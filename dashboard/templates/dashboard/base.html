@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CampsHub360 Dashboard{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            border-radius: 8px;
+            margin: 2px 0;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            background-color: rgba(255,255,255,0.1);
+            color: white;
+        }
+        .main-content {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+            border-radius: 12px;
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .table-responsive {
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <nav class="col-md-3 col-lg-2 d-md-block sidebar collapse">
+                <div class="position-sticky pt-3">
+                    <div class="text-center mb-4">
+                        <h4 class="text-white">
+                            <i class="fas fa-tachometer-alt"></i>
+                            Dashboard
+                        </h4>
+                    </div>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}" 
+                               href="{% url 'dashboard:home' %}">
+                                <i class="fas fa-home"></i> Overview
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'users' %}active{% endif %}" 
+                               href="{% url 'dashboard:users' %}">
+                                <i class="fas fa-users"></i> Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'students' %}active{% endif %}" 
+                               href="{% url 'dashboard:students' %}">
+                                <i class="fas fa-graduation-cap"></i> Students
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'faculty' %}active{% endif %}" 
+                               href="{% url 'dashboard:faculty' %}">
+                                <i class="fas fa-chalkboard-teacher"></i> Faculty
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'custom_fields' %}active{% endif %}" 
+                               href="{% url 'dashboard:custom_fields' %}">
+                                <i class="fas fa-cogs"></i> Custom Fields
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'student_sessions' %}active{% endif %}" 
+                               href="{% url 'dashboard:student_sessions' %}">
+                                <i class="fas fa-clock"></i> Student Sessions
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'roles' %}active{% endif %}" 
+                               href="{% url 'dashboard:roles' %}">
+                                <i class="fas fa-user-shield"></i> Roles
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'sessions' %}active{% endif %}" 
+                               href="{% url 'dashboard:sessions' %}">
+                                <i class="fas fa-clock"></i> Sessions
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'audit' %}active{% endif %}" 
+                               href="{% url 'dashboard:audit' %}">
+                                <i class="fas fa-clipboard-list"></i> Audit Logs
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'schema' %}active{% endif %}" 
+                               href="{% url 'dashboard:schema' %}">
+                                <i class="fas fa-database"></i> Database Schema
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'api_testing' in request.resolver_match.url_name %}active{% endif %}" 
+                               href="{% url 'dashboard:api_testing_dashboard' %}">
+                                <i class="fas fa-code"></i> API Testing
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'simple_api_workspace' in request.resolver_match.url_name %}active{% endif %}" 
+                               href="{% url 'dashboard:simple_api_workspace' %}">
+                                <i class="fas fa-rocket"></i> Quick API Test
+                            </a>
+                        </li>
+                        <li class="nav-item mt-3">
+                            <a class="nav-link" href="/admin/">
+                                <i class="fas fa-cog"></i> Django Admin
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            {% if request.user.is_authenticated %}
+                                <a class="nav-link" href="{% url 'dashboard:logout' %}">
+                                    <i class="fas fa-sign-out-alt"></i> Logout
+                                </a>
+                            {% else %}
+                                <a class="nav-link" href="{% url 'dashboard:login' %}">
+                                    <i class="fas fa-sign-in-alt"></i> Login
+                                </a>
+                            {% endif %}
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.resolver_match.url_name == 'er' %}active{% endif %}" 
+                               href="{% url 'dashboard:er' %}">
+                                <i class="fas fa-project-diagram"></i> ER Diagram
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- Main content -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content">
+                <div class="pt-3 pb-2 mb-3">
+                    {% block content %}
+                    {% endblock %}
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+        window.mermaid = mermaid;
+    </script>
+    <script>
+        // Auto-refresh data every 30 seconds
+        setInterval(function() {
+            location.reload();
+        }, 30000);
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
