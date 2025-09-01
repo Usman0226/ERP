@@ -16,11 +16,4 @@ services:
         value: false
       - key: ALLOWED_HOSTS
         value: ".onrender.com"
-      - key: POSTGRES_DB
-        value: "campshub360"
-      - key: POSTGRES_USER
-        value: "campshub360_user"
-      - key: POSTGRES_HOST
-        value: "localhost"
-      - key: POSTGRES_PORT
-        value: "5432"
+      # Database variables removed - using SQLite

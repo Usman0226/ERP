@@ -126,15 +126,14 @@ Set these in your Render service settings:
 
 ## 🗄️ Database Configuration
 
-For production, you'll need a PostgreSQL database:
+This project is configured to use **SQLite** for simplicity:
 
-1. **Create a PostgreSQL service** in Render
-2. **Add database environment variables** to your web service:
-   - `POSTGRES_DB`
-   - `POSTGRES_USER` 
-   - `POSTGRES_PASSWORD`
-   - `POSTGRES_HOST`
-   - `POSTGRES_PORT`
+- **No additional database service needed**
+- **Uses the existing `db.sqlite3` file**
+- **Automatic migrations during build**
+- **Perfect for development and small production deployments**
+
+**Note**: For larger production deployments, consider upgrading to PostgreSQL later.
 
 ## 📝 Important Notes
 
