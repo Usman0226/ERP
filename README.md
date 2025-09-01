@@ -201,24 +201,44 @@ For production deployment:
 
 ## 🚀 Deployment
 
-### Using Gunicorn
+### Render Deployment (Recommended)
+
+This project is configured for easy deployment on Render.com:
+
+1. **Fork/Clone** this repository to your Render account
+2. **Create a new Web Service** in Render
+3. **Connect your repository**
+4. **Use the following settings**:
+   - **Build Command**: `chmod +x build.sh && ./build.sh`
+   - **Start Command**: `gunicorn campshub360.wsgi:application`
+   - **Environment**: Python 3.11
+
+The project includes:
+- `render.yaml` - Render deployment configuration
+- `build.sh` - Build script for dependencies and migrations
+- `gunicorn.conf.py` - Gunicorn server configuration
+- `campshub360/production.py` - Production settings
+
+### Manual Deployment
+
+#### Using Gunicorn
 
 ```bash
 gunicorn campshub360.wsgi:application --bind 0.0.0.0:8000
 ```
 
-### Using Uvicorn
+#### Using Uvicorn
 
 ```bash
 uvicorn campshub360.asgi:application --host 0.0.0.0 --port 8000
 ```
 
-### Docker (Recommended)
+#### Docker Deployment
 
 Create a `Dockerfile`:
 
 ```dockerfile
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 COPY requirements.txt .
