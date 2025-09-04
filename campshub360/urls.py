@@ -21,14 +21,34 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
+from .health_views import health_check, detailed_health_check, readiness_check, liveness_check
 
 urlpatterns = [
+    # Health check endpoints
+    path('health/', health_check, name='health_check'),
+    path('health/detailed/', detailed_health_check, name='detailed_health_check'),
+    path('health/ready/', readiness_check, name='readiness_check'),
+    path('health/alive/', liveness_check, name='liveness_check'),
+    
     path('admin/', admin.site.urls),
     path('api/auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/accounts/', include('accounts.urls')),
     path('api/v1/students/', include('students.api_urls')),
     path('api/v1/faculty/', include('faculty.urls', namespace='faculty')),
+    path('api/v1/academics/', include('academics.urls', namespace='academics')),
+    path('api/v1/attendance/', include('attendance.urls')),
+    path('api/v1/placements/', include('placements.urls', namespace='placements')),
+    path('api/v1/grads/', include('grads.urls', namespace='grads')),
+    path('api/v1/rnd/', include('rnd.urls', namespace='rnd')),
+    path('api/v1/facilities/', include('facilities.urls', namespace='facilities')),
+    path('api/v1/exams/', include('exams.urls', namespace='exams')),
+    path('api/v1/fees/', include('fees.urls', namespace='fees')),
+    path('api/v1/transport/', include('transportation.urls', namespace='transportation')),
+    path('api/v1/mentoring/', include('mentoring.urls', namespace='mentoring')),
+    path('api/v1/feedback/', include('feedback.urls', namespace='feedback')),
+    path('api/v1/open-requests/', include('open_requests.urls', namespace='open_requests')),
+    path('facilities/', include('facilities.urls', namespace='facilities_dashboard')),
     path('dashboard/', include('dashboard.urls', namespace='dashboard')),
     path('students/', include('students.urls', namespace='students')),
     path('', RedirectView.as_view(pattern_name='dashboard:login', permanent=False)),

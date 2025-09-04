@@ -25,12 +25,12 @@ load_dotenv(BASE_DIR / '.env')
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-8d9_5a+%%@zboc-ve77fs%0ee-4mv#i1^gekhwehtr0i-2r1$f'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-8d9_5a+%%@zboc-ve77fs%0ee-4mv#i1^gekhwehtr0i-2r1$f')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
 
 
 # Application definition
@@ -49,16 +49,33 @@ INSTALLED_APPS = [
     'dashboard',
     'students',
     'faculty',
+    'academics',
+    'enrollment',
+    'attendance',
+    'placements',
+    'grads',
+    'rnd',
+    'facilities',
+    'exams',
+    'fees',
+    'transportation',
+    'mentoring',
+    'feedback',
+    'open_requests',
+    'campshub360',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'campshub360.middleware.PerformanceMonitoringMiddleware',
+    'campshub360.middleware.SecurityHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'campshub360.middleware.HighPerformanceRateLimitMiddleware',
 ]
 
 ROOT_URLCONF = 'campshub360.urls'
@@ -86,10 +103,37 @@ WSGI_APPLICATION = 'campshub360.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('POSTGRES_DB', 'campushub360'),
+        'USER': os.getenv('POSTGRES_USER', 'postgres'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', '123456'),
+        'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+        'PORT': int(os.getenv('POSTGRES_PORT', '5432')),
+        'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),  # 10 minutes
+        'OPTIONS': {
+            'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
+            'MAX_CONNS': int(os.getenv('POSTGRES_MAX_CONNS', '20')),
+            'MIN_CONNS': int(os.getenv('POSTGRES_MIN_CONNS', '5')),
+        },
+    },
+    'read_replica': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('POSTGRES_DB', 'campushub360'),
+        'USER': os.getenv('POSTGRES_USER', 'postgres'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', '123456'),
+        'HOST': os.getenv('POSTGRES_REPLICA_HOST', os.getenv('POSTGRES_HOST', 'localhost')),
+        'PORT': int(os.getenv('POSTGRES_REPLICA_PORT', os.getenv('POSTGRES_PORT', '5432'))),
+        'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),
+        'OPTIONS': {
+            'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
+            'MAX_CONNS': int(os.getenv('POSTGRES_MAX_CONNS', '20')),
+            'MIN_CONNS': int(os.getenv('POSTGRES_MIN_CONNS', '5')),
+        },
     }
 }
+
+# Database Router for Read Replicas
+DATABASE_ROUTERS = ['campshub360.db_router.DatabaseRouter']
 
 
 # Password validation
@@ -138,6 +182,11 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.CursorPagination',
+    'PAGE_SIZE': int(os.getenv('API_PAGE_SIZE', '50')),
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+    ),
 }
 
 # SimpleJWT settings (optional sane defaults)
@@ -157,3 +206,86 @@ AUTH_USER_MODEL = 'accounts.User'
 LOGIN_URL = 'dashboard:login'
 LOGIN_REDIRECT_URL = 'dashboard:home'
 LOGOUT_REDIRECT_URL = 'dashboard:login'
+
+# Caching (Redis) - Enhanced for High Performance
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 50,
+                'retry_on_timeout': True,
+            },
+            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
+            'IGNORE_EXCEPTIONS': True,
+        },
+        'TIMEOUT': int(os.getenv('CACHE_DEFAULT_TIMEOUT', '300')),
+        'KEY_PREFIX': 'campshub360',
+        'VERSION': 1,
+    },
+    'sessions': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/2'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 50,
+            },
+        },
+        'TIMEOUT': int(os.getenv('SESSION_CACHE_TIMEOUT', '86400')),  # 24 hours
+        'KEY_PREFIX': 'session',
+    },
+    'query_cache': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/3'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 30,
+            },
+        },
+        'TIMEOUT': int(os.getenv('QUERY_CACHE_TIMEOUT', '600')),  # 10 minutes
+        'KEY_PREFIX': 'query',
+    }
+}
+
+# Cache session engine for high performance
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'sessions'
+
+# Security Settings for High-Performance Production
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+SECURE_HSTS_SECONDS = 31536000  # 1 year
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
+
+# CSRF Protection
+CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False').lower() == 'true'
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = 'Strict'
+
+# Session Security
+SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False').lower() == 'true'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Strict'
+SESSION_COOKIE_AGE = 3600  # 1 hour
+
+# Performance Settings
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
+
+# Database Query Optimization
+DATABASES['default']['OPTIONS'].update({
+    'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+    'charset': 'utf8mb4',
+})
+
+# Connection Pooling
+DATABASES['default']['CONN_MAX_AGE'] = 600  # 10 minutes
+DATABASES['read_replica']['CONN_MAX_AGE'] = 600

@@ -1,6 +1,6 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
-from django.db import connection
+from django.db import connection, models
 from django.apps import apps
 from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
@@ -17,10 +17,160 @@ import csv
 import os
 
 from .models import APICollection, APIEnvironment, APIRequest, APITest, APITestResult, APITestSuite, APITestSuiteResult, APIAutomation
+from academics.models import Course, Syllabus, Timetable, CourseEnrollment, AcademicCalendar, Department, AcademicProgram, CourseSection
+from attendance.models import AttendanceSession, AttendanceRecord
+from enrollment.models import EnrollmentRule, CourseAssignment, FacultyAssignment, StudentEnrollmentPlan, PlannedCourse, EnrollmentRequest, WaitlistEntry
+from grads.models import GradeScale, Term, CourseResult, TermGPA, GraduateRecord
+from rnd.models import Researcher as RndResearcher, Grant as RndGrant, Project as RndProject, Publication as RndPublication, Patent as RndPatent, Dataset as RndDataset, Collaboration as RndCollaboration
+from fees.models import FeeCategory, FeeStructure, FeeStructureDetail, StudentFee, Payment, FeeWaiver, FeeDiscount, FeeReceipt
+from transportation.models import Vehicle, Driver, Route, Stop, RouteStop, VehicleAssignment, TripSchedule, TransportPass
+from transportation.forms import (
+    VehicleForm,
+    DriverForm,
+    RouteForm,
+    StopForm,
+    RouteStopForm,
+    VehicleAssignmentForm,
+    TripScheduleForm,
+    TransportPassForm,
+)
+from django.contrib import messages
+from mentoring.models import Mentorship, Project, Meeting, Feedback
+from feedback.models import Feedback as UnivFeedback, FeedbackCategory as UnivFeedbackCategory, FeedbackTag as UnivFeedbackTag, FeedbackComment as UnivFeedbackComment, FeedbackAttachment as UnivFeedbackAttachment, FeedbackVote as UnivFeedbackVote
 
-
+# Ensure is_admin is defined before any decorators use it
 def is_admin(user):
     return user.is_authenticated and user.is_staff
+@login_required
+@user_passes_test(is_admin)
+def feedback_dashboard(request):
+    stats = {
+        'total': UnivFeedback.objects.count(),
+        'open': UnivFeedback.objects.filter(status='open').count(),
+        'in_review': UnivFeedback.objects.filter(status='in_review').count(),
+        'resolved': UnivFeedback.objects.filter(status='resolved').count(),
+        'closed': UnivFeedback.objects.filter(status='closed').count(),
+    }
+    recent = UnivFeedback.objects.select_related('category', 'created_by').order_by('-created_at')[:10]
+    return render(request, 'dashboard/feedback/dashboard.html', {
+        'stats': stats,
+        'recent': recent,
+        'categories': UnivFeedbackCategory.objects.filter(is_active=True).order_by('name'),
+        'tags': UnivFeedbackTag.objects.order_by('name'),
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def feedback_items_list(request):
+    items = UnivFeedback.objects.select_related('category', 'created_by', 'department', 'course', 'section', 'faculty', 'syllabus').prefetch_related('tags').all()
+    # Filters
+    q = request.GET.get('q')
+    status_f = request.GET.get('status')
+    category_f = request.GET.get('category')
+    department_f = request.GET.get('department')
+    course_f = request.GET.get('course')
+    faculty_f = request.GET.get('faculty')
+    if q:
+        items = items.filter(Q(title__icontains=q) | Q(description__icontains=q))
+    if status_f:
+        items = items.filter(status=status_f)
+    if category_f:
+        items = items.filter(category_id=category_f)
+    if department_f:
+        items = items.filter(department_id=department_f)
+    if course_f:
+        items = items.filter(course_id=course_f)
+    if faculty_f:
+        items = items.filter(faculty_id=faculty_f)
+    items = items.order_by('-created_at')
+    return render(request, 'dashboard/feedback/items_list.html', {
+        'items': items,
+        'categories': UnivFeedbackCategory.objects.filter(is_active=True).order_by('name'),
+        'departments': Department.objects.order_by('name'),
+        'courses': Course.objects.order_by('code'),
+        'faculties': Faculty.objects.order_by('-created_at')[:100],
+        'status_choices': UnivFeedback.Status.choices,
+        'current': {
+            'q': q, 'status': status_f, 'category': category_f, 'department': department_f, 'course': course_f, 'faculty': faculty_f
+        }
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def feedback_item_detail(request, item_id):
+    item = get_object_or_404(UnivFeedback.objects.select_related('category', 'created_by', 'department', 'course', 'section', 'faculty', 'syllabus'), id=item_id)
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'comment':
+            content = request.POST.get('content', '').strip()
+            if content:
+                UnivFeedbackComment.objects.create(feedback=item, commented_by=request.user, content=content, is_internal=bool(request.POST.get('is_internal')))
+                messages.success(request, 'Comment added')
+            return redirect('dashboard:feedback_item_detail', item_id=item.id)
+        if action == 'vote':
+            is_up = request.POST.get('is_up') == '1'
+            UnivFeedbackVote.objects.update_or_create(feedback=item, voted_by=request.user, defaults={'is_upvote': is_up})
+            messages.success(request, 'Vote recorded')
+            return redirect('dashboard:feedback_item_detail', item_id=item.id)
+        if action == 'update_status':
+            new_status = request.POST.get('status')
+            if new_status in dict(UnivFeedback.Status.choices):
+                item.status = new_status
+                item.save(update_fields=['status'])
+                messages.success(request, 'Status updated')
+            return redirect('dashboard:feedback_item_detail', item_id=item.id)
+    comments = item.comments.select_related('commented_by').order_by('-created_at')
+    votes = item.votes.select_related('voted_by')
+    score = votes.filter(is_upvote=True).count() - votes.filter(is_upvote=False).count()
+    return render(request, 'dashboard/feedback/item_detail.html', {
+        'item': item,
+        'comments': comments,
+        'votes': votes,
+        'score': score,
+        'status_choices': UnivFeedback.Status.choices,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def feedback_item_create(request):
+    if request.method == 'POST':
+        title = request.POST.get('title', '').strip()
+        description = request.POST.get('description', '').strip()
+        category_id = request.POST.get('category_id') or None
+        priority = request.POST.get('priority') or UnivFeedback.Priority.MEDIUM
+        department_id = request.POST.get('department_id') or None
+        course_id = request.POST.get('course_id') or None
+        section_id = request.POST.get('section_id') or None
+        faculty_id = request.POST.get('faculty_id') or None
+        syllabus_id = request.POST.get('syllabus_id') or None
+        if title and description:
+            item = UnivFeedback.objects.create(
+                title=title,
+                description=description,
+                category_id=category_id,
+                created_by=request.user,
+                priority=priority,
+                department_id=department_id,
+                course_id=course_id,
+                section_id=section_id,
+                faculty_id=faculty_id,
+                syllabus_id=syllabus_id,
+            )
+            messages.success(request, 'Feedback created')
+            return redirect('dashboard:feedback_item_detail', item_id=item.id)
+        messages.error(request, 'Title and description are required')
+    return render(request, 'dashboard/feedback/item_create.html', {
+        'categories': UnivFeedbackCategory.objects.filter(is_active=True).order_by('name'),
+        'departments': Department.objects.order_by('name'),
+        'courses': Course.objects.order_by('code'),
+        'sections': CourseSection.objects.order_by('course__code', 'section_number')[:200],
+        'faculties': Faculty.objects.order_by('-created_at')[:200],
+        'syllabi': Syllabus.objects.order_by('-created_at')[:200],
+        'priority_choices': UnivFeedback.Priority.choices,
+    })
 
 
 @login_required
@@ -42,8 +192,42 @@ def dashboard_home(request):
         'recent_logins': AuditLog.objects.filter(action='login').order_by('-created_at')[:10],
         'recent_students': Student.objects.order_by('-created_at')[:5],
         'recent_faculty': Faculty.objects.order_by('-created_at')[:5],
+        # Academics statistics
+        'total_courses': Course.objects.count(),
+        'total_syllabi': Syllabus.objects.count(),
+        'total_timetables': Timetable.objects.filter(is_active=True).count(),
+        'total_enrollments': CourseEnrollment.objects.count(),
+        'total_departments': Department.objects.count(),
+        'total_programs': AcademicProgram.objects.count(),
+        'total_sections': CourseSection.objects.count(),
+        # Enrollment statistics
+        'total_enrollment_rules': EnrollmentRule.objects.count(),
+        'total_course_assignments': CourseAssignment.objects.count(),
+        'total_faculty_assignments': FacultyAssignment.objects.count(),
+        'total_enrollment_plans': StudentEnrollmentPlan.objects.count(),
+        'total_enrollment_requests': EnrollmentRequest.objects.count(),
+        'total_waitlist_entries': WaitlistEntry.objects.filter(is_active=True).count(),
+        # Fee Management statistics
+        'total_fee_categories': FeeCategory.objects.filter(is_active=True).count(),
+        'total_fee_structures': FeeStructure.objects.filter(is_active=True).count(),
+        'total_student_fees': StudentFee.objects.count(),
+        'total_payments': Payment.objects.filter(status='COMPLETED').count(),
+        'total_fees_due': StudentFee.objects.aggregate(total=models.Sum('amount_due'))['total'] or 0,
+        'total_fees_paid': StudentFee.objects.aggregate(total=models.Sum('amount_paid'))['total'] or 0,
+        'overdue_fees_count': StudentFee.objects.filter(due_date__lt=timezone.now().date(), status='PENDING').count(),
+        # Feedback statistics
+        'total_feedback': UnivFeedback.objects.count(),
+        'open_feedback': UnivFeedback.objects.filter(status='open').count(),
+        'recent_feedback': UnivFeedback.objects.order_by('-created_at')[:5],
     }
     return render(request, 'dashboard/home.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def facilities_dashboard(request):
+    """Facilities management dashboard - redirects to facilities app"""
+    return redirect('facilities_dashboard:dashboard')
 
 
 @login_required
@@ -76,6 +260,420 @@ def audit_logs(request):
     """Audit logs page"""
     logs = AuditLog.objects.all().order_by('-created_at')[:100]
     return render(request, 'dashboard/audit_logs.html', {'logs': logs})
+
+
+# ---------------------
+# Grads & Marks Dashboard
+# ---------------------
+
+@login_required
+@user_passes_test(is_admin)
+def grads_dashboard(request):
+    context = {
+        'grade_scales_count': GradeScale.objects.count(),
+        'terms_count': Term.objects.count(),
+        'results_count': CourseResult.objects.count(),
+        'students_with_records': GraduateRecord.objects.count(),
+    }
+    return render(request, 'dashboard/grads/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def grads_grade_scales(request):
+    items = GradeScale.objects.order_by('-grade_points')
+    departments = Department.objects.order_by('code')
+    programs = AcademicProgram.objects.order_by('code')
+    return render(request, 'dashboard/grads/grade_scales.html', {
+        'items': items,
+        'departments': departments,
+        'programs': programs,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def grads_terms(request):
+    terms = Term.objects.order_by('-academic_year', 'semester')
+    return render(request, 'dashboard/grads/terms.html', {'terms': terms})
+
+
+# ---------------------
+# Transportation Dashboard
+# ---------------------
+
+@login_required
+@user_passes_test(is_admin)
+def transport_dashboard(request):
+    context = {
+        'vehicles_count': Vehicle.objects.count(),
+        'drivers_count': Driver.objects.count(),
+        'routes_count': Route.objects.count(),
+        'stops_count': Stop.objects.count(),
+        'assignments_count': VehicleAssignment.objects.count(),
+        'schedules_count': TripSchedule.objects.count(),
+        'passes_count': TransportPass.objects.count(),
+    }
+    return render(request, 'dashboard/transportation/dashboard.html', context)
+
+
+# -----------------
+# Mentoring Dashboard
+# -----------------
+
+@login_required
+@user_passes_test(is_admin)
+def mentoring_dashboard(request):
+    total_mentorships = Mentorship.objects.count()
+    active_mentorships = Mentorship.objects.filter(is_active=True).count()
+    total_projects = Project.objects.count()
+    upcoming_meetings = Meeting.objects.filter(scheduled_at__gte=timezone.now()).order_by('scheduled_at')[:10]
+    recent_feedback = Feedback.objects.order_by('-created_at')[:10]
+
+    context = {
+        'total_mentorships': total_mentorships,
+        'active_mentorships': active_mentorships,
+        'total_projects': total_projects,
+        'upcoming_meetings': upcoming_meetings,
+        'recent_feedback': recent_feedback,
+    }
+    return render(request, 'dashboard/mentoring/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def mentoring_mentorships(request):
+    mentorships = Mentorship.objects.select_related('mentor', 'student').all()[:200]
+    return render(request, 'dashboard/mentoring/mentorships.html', {'mentorships': mentorships})
+
+
+@login_required
+@user_passes_test(is_admin)
+def mentoring_projects(request):
+    projects = Project.objects.select_related('mentorship').all()[:200]
+    return render(request, 'dashboard/mentoring/projects.html', {'projects': projects})
+
+
+@login_required
+@user_passes_test(is_admin)
+def mentoring_meetings(request):
+    meetings = Meeting.objects.select_related('mentorship').order_by('-scheduled_at')[:200]
+    return render(request, 'dashboard/mentoring/meetings.html', {'meetings': meetings})
+
+
+@login_required
+@user_passes_test(is_admin)
+def mentoring_feedback(request):
+    feedback = Feedback.objects.select_related('mentorship', 'project', 'meeting').order_by('-created_at')[:200]
+    return render(request, 'dashboard/mentoring/feedback.html', {'feedback': feedback})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_vehicles(request):
+    q = request.GET.get('q')
+    items = Vehicle.objects.all()
+    if q:
+        items = items.filter(Q(number_plate__icontains=q) | Q(registration_number__icontains=q) | Q(make__icontains=q) | Q(model__icontains=q))
+    items = items.order_by('number_plate')
+    if request.GET.get('export') == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="vehicles.csv"'
+        writer = csv.writer(response)
+        writer.writerow(['Number Plate', 'Registration', 'Make', 'Model', 'Capacity', 'Active'])
+        for v in items:
+            writer.writerow([v.number_plate, v.registration_number, v.make, v.model, v.capacity, v.is_active])
+        return response
+    return render(request, 'dashboard/transportation/vehicles.html', {'items': items, 'q': q or ''})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_drivers(request):
+    q = request.GET.get('q')
+    items = Driver.objects.all()
+    if q:
+        items = items.filter(Q(full_name__icontains=q) | Q(phone__icontains=q) | Q(license_number__icontains=q))
+    items = items.order_by('full_name')
+    return render(request, 'dashboard/transportation/drivers.html', {'items': items, 'q': q or ''})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_routes(request):
+    q = request.GET.get('q')
+    items = Route.objects.all()
+    if q:
+        items = items.filter(Q(name__icontains=q) | Q(description__icontains=q))
+    items = items.order_by('name').prefetch_related('route_stops__stop')
+    if request.GET.get('export') == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="routes.csv"'
+        writer = csv.writer(response)
+        writer.writerow(['Name', 'Description', 'Distance (km)', 'Active'])
+        for r in items:
+            writer.writerow([r.name, r.description, r.distance_km, r.is_active])
+        return response
+    return render(request, 'dashboard/transportation/routes.html', {'items': items, 'q': q or ''})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_stops(request):
+    q = request.GET.get('q')
+    items = Stop.objects.all()
+    if q:
+        items = items.filter(Q(name__icontains=q) | Q(landmark__icontains=q))
+    items = items.order_by('name')
+    return render(request, 'dashboard/transportation/stops.html', {'items': items, 'q': q or ''})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_assignments(request):
+    q = request.GET.get('q')
+    items = VehicleAssignment.objects.select_related('vehicle', 'driver', 'route').all()
+    if q:
+        items = items.filter(Q(vehicle__number_plate__icontains=q) | Q(driver__full_name__icontains=q) | Q(route__name__icontains=q))
+    items = items.order_by('-start_date')
+    return render(request, 'dashboard/transportation/assignments.html', {'items': items, 'q': q or ''})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_schedules(request):
+    q = request.GET.get('q')
+    items = TripSchedule.objects.select_related('assignment', 'assignment__vehicle', 'assignment__route').all()
+    if q:
+        items = items.filter(Q(assignment__vehicle__number_plate__icontains=q) | Q(assignment__route__name__icontains=q))
+    items = items.order_by('day_of_week', 'departure_time')
+    return render(request, 'dashboard/transportation/schedules.html', {'items': items, 'q': q or ''})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_passes(request):
+    q = request.GET.get('q')
+    items = TransportPass.objects.select_related('user', 'route', 'start_stop', 'end_stop').all()
+    if q:
+        items = items.filter(Q(user__username__icontains=q) | Q(user__email__icontains=q) | Q(route__name__icontains=q))
+    items = items.order_by('-valid_from')
+    return render(request, 'dashboard/transportation/passes.html', {'items': items, 'q': q or ''})
+
+
+# Create Views (simple create-only forms for now)
+
+@login_required
+@user_passes_test(is_admin)
+def transport_vehicle_create(request):
+    if request.method == 'POST':
+        form = VehicleForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Vehicle created successfully.')
+            return redirect('dashboard:transport_vehicles')
+    else:
+        form = VehicleForm()
+    return render(request, 'dashboard/transportation/create_form.html', {'form': form, 'title': 'Add Vehicle'})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_driver_create(request):
+    if request.method == 'POST':
+        form = DriverForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Driver created successfully.')
+            return redirect('dashboard:transport_drivers')
+    else:
+        form = DriverForm()
+    return render(request, 'dashboard/transportation/create_form.html', {'form': form, 'title': 'Add Driver'})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_route_create(request):
+    if request.method == 'POST':
+        form = RouteForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Route created successfully.')
+            return redirect('dashboard:transport_routes')
+    else:
+        form = RouteForm()
+    return render(request, 'dashboard/transportation/create_form.html', {'form': form, 'title': 'Add Route'})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_stop_create(request):
+    if request.method == 'POST':
+        form = StopForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Stop created successfully.')
+            return redirect('dashboard:transport_stops')
+    else:
+        form = StopForm()
+    return render(request, 'dashboard/transportation/create_form.html', {'form': form, 'title': 'Add Stop'})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_assignment_create(request):
+    if request.method == 'POST':
+        form = VehicleAssignmentForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Assignment created successfully.')
+            return redirect('dashboard:transport_assignments')
+    else:
+        form = VehicleAssignmentForm()
+    return render(request, 'dashboard/transportation/create_form.html', {'form': form, 'title': 'Add Assignment'})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_schedule_create(request):
+    if request.method == 'POST':
+        form = TripScheduleForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Schedule created successfully.')
+            return redirect('dashboard:transport_schedules')
+    else:
+        form = TripScheduleForm()
+    return render(request, 'dashboard/transportation/create_form.html', {'form': form, 'title': 'Add Schedule'})
+
+
+@login_required
+@user_passes_test(is_admin)
+def transport_pass_create(request):
+    if request.method == 'POST':
+        form = TransportPassForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Transport pass created successfully.')
+            return redirect('dashboard:transport_passes')
+    else:
+        form = TransportPassForm()
+    return render(request, 'dashboard/transportation/create_form.html', {'form': form, 'title': 'Add Transport Pass'})
+
+
+@login_required
+@user_passes_test(is_admin)
+def grads_results(request):
+    student_id = request.GET.get('student')
+    term_id = request.GET.get('term')
+    dept_code = request.GET.get('department')
+    course_id = request.GET.get('course')
+    year = request.GET.get('year')
+    section = request.GET.get('section')
+    results = CourseResult.objects.select_related('student', 'term', 'course_section', 'course_section__course')
+    if student_id:
+        results = results.filter(student_id=student_id)
+    if term_id:
+        results = results.filter(term_id=term_id)
+    if dept_code:
+        results = results.filter(course_section__course__department__code__iexact=dept_code)
+    if course_id:
+        results = results.filter(course_section__course_id=course_id)
+    if year:
+        results = results.filter(course_section__academic_year=year)
+    if section:
+        results = results.filter(course_section__section_number__iexact=section)
+    results = results.order_by('-evaluated_at')[:500]
+    # Build filter option lists
+    years = CourseSection.objects.values_list('academic_year', flat=True).distinct().order_by('-academic_year')
+    sections = CourseSection.objects.values_list('section_number', flat=True).distinct().order_by('section_number')
+    courses = Course.objects.order_by('code')[:500]
+    students_qs = Student.objects.order_by('roll_number')[:500]
+    course_sections = CourseSection.objects.select_related('course').order_by('course__code', 'section_number')[:500]
+    return render(request, 'dashboard/grads/results.html', {
+        'results': results,
+        'terms': Term.objects.all().order_by('-academic_year'),
+        'years': years,
+        'sections': sections,
+        'courses': courses,
+        'students_list': students_qs,
+        'course_sections': course_sections,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def grads_bulk_entry(request):
+    terms = Term.objects.all().order_by('-academic_year')
+    years = CourseSection.objects.values_list('academic_year', flat=True).distinct().order_by('-academic_year')
+    sections = CourseSection.objects.values_list('section_number', flat=True).distinct().order_by('section_number')
+    courses = Course.objects.order_by('code')[:500]
+    students_qs = Student.objects.order_by('roll_number')[:500]
+    return render(request, 'dashboard/grads/bulk_entry.html', {
+        'terms': terms,
+        'years': years,
+        'sections': sections,
+        'courses': courses,
+        'students_list': students_qs,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def grads_sections_api(request):
+    year = request.GET.get('year')
+    course_id = request.GET.get('course')
+    qs = CourseSection.objects.all()
+    if year:
+        qs = qs.filter(academic_year=year)
+    if course_id:
+        qs = qs.filter(course_id=course_id)
+    data = [
+        {
+            'id': s.id,
+            'section_number': s.section_number,
+            'faculty': getattr(s.faculty, 'name', ''),
+            'semester': s.semester,
+        } for s in qs.order_by('section_number')[:200]
+    ]
+    return JsonResponse({'sections': data})
+
+
+@login_required
+@user_passes_test(is_admin)
+def grads_students_api(request):
+    year = request.GET.get('year')
+    section = request.GET.get('section')
+    # Filter students by enrollment history if available else return all
+    students = Student.objects.all()
+    if section:
+        students = students.filter(section=section)
+    if year:
+        students = students.filter(academic_year=year)
+    data = [
+        {
+            'id': s.id,
+            'roll_number': s.roll_number,
+            'full_name': s.full_name,
+        } for s in students.order_by('roll_number')[:500]
+    ]
+    return JsonResponse({'students': data})
+
+
+@login_required
+@user_passes_test(is_admin)
+def grads_transcript(request, student_id):
+    student = get_object_or_404(Student, id=student_id)
+    grad = GraduateRecord.objects.filter(student=student).first()
+    term_gpas = TermGPA.objects.filter(student=student).select_related('term').order_by('-term__academic_year')
+    results = CourseResult.objects.filter(student=student).select_related('term', 'course_section', 'course_section__course').order_by('-term__academic_year')
+    context = {
+        'student': student,
+        'grad': grad,
+        'term_gpas': term_gpas,
+        'results': results,
+    }
+    return render(request, 'dashboard/grads/transcript.html', context)
 
 
 @login_required
@@ -364,6 +962,123 @@ def er_diagram_page(request):
     """Render a page that shows the ER diagram using Mermaid."""
     mermaid = _generate_mermaid_er_diagram()
     return render(request, 'dashboard/er.html', { 'mermaid': mermaid })
+
+
+# ------------------------------
+# R&D (Research & Development)
+# ------------------------------
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_dashboard(request):
+    context = {
+        'projects_count': RndProject.objects.count(),
+        'publications_count': RndPublication.objects.count(),
+        'grants_count': RndGrant.objects.count(),
+        'researchers_count': RndResearcher.objects.count(),
+        'datasets_count': RndDataset.objects.count(),
+        'patents_count': RndPatent.objects.count(),
+        'recent_projects': RndProject.objects.order_by('-start_date')[:10],
+        'recent_publications': RndPublication.objects.order_by('-year')[:10],
+    }
+    return render(request, 'dashboard/rnd/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_projects(request):
+    search = request.GET.get('search', '')
+    status = request.GET.get('status', '')
+    qs = RndProject.objects.select_related('principal_investigator').prefetch_related('members')
+    if search:
+        qs = qs.filter(Q(title__icontains=search) | Q(abstract__icontains=search))
+    if status:
+        qs = qs.filter(status=status)
+    projects = qs.order_by('-start_date')[:500]
+    return render(request, 'dashboard/rnd/projects.html', {
+        'projects': projects,
+        'status_filter': status,
+        'search': search,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_project_detail(request, project_id: int):
+    project = get_object_or_404(RndProject.objects.select_related('principal_investigator').prefetch_related('members', 'grants', 'publications', 'datasets', 'patents', 'collaborations'), id=project_id)
+    return render(request, 'dashboard/rnd/project_detail.html', {
+        'project': project,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_researchers(request):
+    search = request.GET.get('search', '')
+    dept = request.GET.get('department', '')
+    qs = RndResearcher.objects.select_related('user')
+    if search:
+        qs = qs.filter(Q(user__first_name__icontains=search) | Q(user__last_name__icontains=search) | Q(user__username__icontains=search) | Q(department__icontains=search))
+    if dept:
+        qs = qs.filter(department__icontains=dept)
+    researchers = qs.order_by('user__last_name', 'user__first_name')[:500]
+    return render(request, 'dashboard/rnd/researchers.html', {
+        'researchers': researchers,
+        'search': search,
+        'department': dept,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_researcher_detail(request, researcher_id: int):
+    researcher = get_object_or_404(RndResearcher.objects.select_related('user'), id=researcher_id)
+    led_projects = RndProject.objects.filter(principal_investigator=researcher).order_by('-start_date')
+    member_projects = RndProject.objects.filter(members=researcher).exclude(principal_investigator=researcher).order_by('-start_date')
+    publications = RndPublication.objects.filter(authors=researcher).order_by('-year')
+    patents = RndPatent.objects.filter(inventors=researcher).order_by('-grant_date')
+    return render(request, 'dashboard/rnd/researcher_detail.html', {
+        'researcher': researcher,
+        'led_projects': led_projects,
+        'member_projects': member_projects,
+        'publications': publications,
+        'patents': patents,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_grants(request):
+    grants = RndGrant.objects.order_by('-start_date')[:500]
+    return render(request, 'dashboard/rnd/grants.html', {'grants': grants})
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_publications(request):
+    pubs = RndPublication.objects.order_by('-year', 'title')[:500]
+    return render(request, 'dashboard/rnd/publications.html', {'publications': pubs})
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_patents(request):
+    items = RndPatent.objects.order_by('-grant_date', '-filing_date')[:500]
+    return render(request, 'dashboard/rnd/patents.html', {'patents': items})
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_datasets(request):
+    items = RndDataset.objects.order_by('name')[:500]
+    return render(request, 'dashboard/rnd/datasets.html', {'datasets': items})
+
+
+@login_required
+@user_passes_test(is_admin)
+def rnd_collaborations(request):
+    items = RndCollaboration.objects.select_related('project').order_by('-start_date')[:500]
+    return render(request, 'dashboard/rnd/collaborations.html', {'collaborations': items})
 
 
 @api_view(['GET'])
@@ -1357,6 +2072,222 @@ def custom_fields_list(request):
     }
     return render(request, 'dashboard/custom_fields.html', context)
 
+
+# ------------------------------
+# Placements Dashboard Views
+# ------------------------------
+@login_required
+@user_passes_test(is_admin)
+def placements_dashboard(request):
+    """Placements overview page."""
+    from placements.models import Company, JobPosting, Application, PlacementDrive, InterviewRound, Offer
+    context = {
+        'companies_count': Company.objects.count(),
+        'jobs_count': JobPosting.objects.count(),
+        'applications_count': Application.objects.count(),
+        'drives_count': PlacementDrive.objects.count(),
+        'rounds_count': InterviewRound.objects.count(),
+        'offers_count': Offer.objects.count(),
+    }
+    return render(request, 'dashboard/placements/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def placements_companies(request):
+    """List and create companies."""
+    from placements.models import Company
+    if request.method == 'POST':
+        name = request.POST.get('name', '').strip()
+        website = request.POST.get('website', '').strip() or None
+        industry = request.POST.get('industry', '').strip()
+        description = request.POST.get('description', '').strip()
+        headquarters = request.POST.get('headquarters', '').strip()
+        contact_email = request.POST.get('contact_email', '').strip() or None
+        contact_phone = request.POST.get('contact_phone', '').strip()
+        if name:
+            Company.objects.create(
+                name=name,
+                website=website,
+                industry=industry,
+                description=description,
+                headquarters=headquarters,
+                contact_email=contact_email,
+                contact_phone=contact_phone,
+            )
+    search = request.GET.get('search', '').strip()
+    companies = Company.objects.all()
+    if search:
+        companies = companies.filter(Q(name__icontains=search) | Q(industry__icontains=search))
+    companies = companies.order_by('name')
+    context = {'companies': companies}
+    return render(request, 'dashboard/placements/companies.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def placements_jobs(request):
+    """List and create job postings."""
+    from placements.models import Company, JobPosting, JobType, WorkMode
+    if request.method == 'POST':
+        company_id = request.POST.get('company_id')
+        title = request.POST.get('title', '').strip()
+        description = request.POST.get('description', '').strip()
+        location = request.POST.get('location', '').strip()
+        work_mode = request.POST.get('work_mode') or WorkMode.ONSITE
+        job_type = request.POST.get('job_type') or JobType.INTERNSHIP
+        is_active = request.POST.get('is_active') == 'on'
+        if title and company_id:
+            try:
+                company = Company.objects.get(id=company_id)
+                JobPosting.objects.create(
+                    company=company,
+                    title=title,
+                    description=description,
+                    location=location,
+                    work_mode=work_mode,
+                    job_type=job_type,
+                    is_active=is_active,
+                    posted_by=request.user,
+                )
+            except Company.DoesNotExist:
+                pass
+    jobs = (
+        JobPosting.objects.select_related('company')
+        .all()
+        .order_by('-created_at')
+    )
+    companies = Company.objects.order_by('name')
+    context = {
+        'jobs': jobs,
+        'companies': companies,
+        'job_types': [(c.value, c.label) for c in JobType],
+        'work_modes': [(c.value, c.label) for c in WorkMode],
+    }
+    return render(request, 'dashboard/placements/jobs.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def placements_applications(request):
+    """List applications with simple filters."""
+    from placements.models import Application, ApplicationStatus
+    status = request.GET.get('status', '').strip()
+    qs = Application.objects.select_related('student', 'job', 'job__company').all()
+    if status:
+        qs = qs.filter(status=status)
+    applications = qs.order_by('-applied_at')
+    context = {
+        'applications': applications,
+        'status_choices': [(c.value, c.label) for c in ApplicationStatus],
+    }
+    return render(request, 'dashboard/placements/applications.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def placements_drives(request):
+    """List and simple create for placement drives."""
+    from placements.models import PlacementDrive, Company
+    if request.method == 'POST':
+        title = request.POST.get('title', '').strip()
+        company_name = request.POST.get('company', '').strip()
+        drive_type = request.POST.get('drive_type') or 'CAMPUS'
+        start_date = request.POST.get('start_date')
+        end_date = request.POST.get('end_date') or None
+        description = request.POST.get('description', '').strip()
+        if title and company_name and start_date:
+            company = Company.objects.filter(name__iexact=company_name).first()
+            if company:
+                PlacementDrive.objects.create(
+                    company=company,
+                    title=title,
+                    description=description,
+                    drive_type=drive_type,
+                    start_date=start_date,
+                    end_date=end_date or None,
+                    created_by=request.user,
+                )
+    drives = PlacementDrive.objects.select_related('company').all().order_by('-start_date')
+    companies = Company.objects.order_by('name')
+    context = {
+        'drives': drives,
+        'companies': companies,
+    }
+    return render(request, 'dashboard/placements/drives.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def placements_rounds(request):
+    """List and create interview rounds linked to a drive."""
+    from placements.models import InterviewRound, PlacementDrive, InterviewRoundType
+    if request.method == 'POST':
+        drive_id = request.POST.get('drive_id')
+        name = request.POST.get('name', '').strip()
+        round_type = request.POST.get('round_type') or InterviewRoundType.OTHER
+        scheduled_at = request.POST.get('scheduled_at') or None
+        location = request.POST.get('location', '').strip()
+        instructions = request.POST.get('instructions', '').strip()
+        if drive_id and name:
+            try:
+                drive = PlacementDrive.objects.get(id=drive_id)
+                InterviewRound.objects.create(
+                    drive=drive,
+                    name=name,
+                    round_type=round_type,
+                    scheduled_at=scheduled_at or None,
+                    location=location,
+                    instructions=instructions,
+                )
+            except PlacementDrive.DoesNotExist:
+                pass
+    rounds = InterviewRound.objects.select_related('drive').all().order_by('-scheduled_at')
+    drives = PlacementDrive.objects.order_by('-start_date')
+    context = {
+        'rounds': rounds,
+        'drives': drives,
+        'round_types': [(c.value, c.label) for c in InterviewRoundType],
+    }
+    return render(request, 'dashboard/placements/rounds.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def placements_offers(request):
+    """List and create offers for applications."""
+    from placements.models import Offer, Application, OfferStatus
+    if request.method == 'POST':
+        application_id = request.POST.get('application_id')
+        offered_role = request.POST.get('offered_role', '').strip()
+        package_annual_ctc = request.POST.get('package_annual_ctc')
+        joining_location = request.POST.get('joining_location', '').strip()
+        joining_date = request.POST.get('joining_date') or None
+        status = request.POST.get('status') or OfferStatus.PENDING
+        if application_id and offered_role and package_annual_ctc:
+            try:
+                application = Application.objects.get(id=application_id)
+                Offer.objects.update_or_create(
+                    application=application,
+                    defaults={
+                        'offered_role': offered_role,
+                        'package_annual_ctc': package_annual_ctc,
+                        'joining_location': joining_location,
+                        'joining_date': joining_date or None,
+                        'status': status,
+                    }
+                )
+            except Application.DoesNotExist:
+                pass
+    offers = Offer.objects.select_related('application', 'application__student', 'application__job', 'application__job__company').all().order_by('-offered_at')
+    applications = Application.objects.select_related('student', 'job', 'job__company').all().order_by('-applied_at')
+    context = {
+        'offers': offers,
+        'applications': applications,
+        'status_choices': [(c.value, c.label) for c in OfferStatus],
+    }
+    return render(request, 'dashboard/placements/offers.html', context)
+
 @login_required
 @user_passes_test(is_admin)
 def faculty_performance_stats(request):
@@ -1567,3 +2498,2136 @@ def faculty_custom_fields_list(request):
         'now': timezone.now(),
     }
     return render(request, 'dashboard/faculty/custom_fields.html', context)
+
+
+# ============================================================================
+# ACADEMICS DASHBOARD VIEWS
+# ============================================================================
+
+@login_required
+@user_passes_test(is_admin)
+def academics_dashboard(request):
+    """Main academics dashboard with statistics"""
+    context = {
+        'total_courses': Course.objects.count(),
+        'active_courses': Course.objects.filter(status='ACTIVE').count(),
+        'total_syllabi': Syllabus.objects.count(),
+        'approved_syllabi': Syllabus.objects.filter(status='APPROVED').count(),
+        'total_timetables': Timetable.objects.filter(is_active=True).count(),
+        'total_enrollments': CourseEnrollment.objects.count(),
+        'active_enrollments': CourseEnrollment.objects.filter(status='ENROLLED').count(),
+        'total_calendar_events': AcademicCalendar.objects.count(),
+        'upcoming_events': AcademicCalendar.objects.filter(start_date__gte=timezone.now().date()).count(),
+        'recent_courses': Course.objects.order_by('-created_at')[:5],
+        'recent_syllabi': Syllabus.objects.order_by('-created_at')[:5],
+        'recent_enrollments': CourseEnrollment.objects.order_by('-created_at')[:5],
+        'recent_events': AcademicCalendar.objects.order_by('-created_at')[:5],
+    }
+    return render(request, 'dashboard/academics/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_courses_list(request):
+    """Courses management page"""
+    courses = Course.objects.all().order_by('code')
+    
+    # Filtering
+    level_filter = request.GET.get('level')
+    status_filter = request.GET.get('status')
+    
+    if level_filter:
+        courses = courses.filter(level=level_filter)
+    if status_filter:
+        courses = courses.filter(status=status_filter)
+    
+    # Statistics
+    context = {
+        'courses': courses,
+        'total_courses': Course.objects.count(),
+        'active_courses': Course.objects.filter(status='ACTIVE').count(),
+        'level_choices': Course.COURSE_LEVELS,
+        'status_choices': Course.COURSE_STATUS,
+        'current_filters': {
+            'level': level_filter,
+            'status': status_filter,
+        }
+    }
+    return render(request, 'dashboard/academics/courses.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_course_detail(request, course_id):
+    """Course detail page"""
+    course = get_object_or_404(Course, id=course_id)
+    
+    # Get related data
+    syllabus = getattr(course, 'syllabus', None)
+    timetables = course.timetables.filter(is_active=True).order_by('day_of_week', 'start_time')
+    enrollments = course.enrollments.all().order_by('-academic_year', '-semester')
+    
+    context = {
+        'course': course,
+        'syllabus': syllabus,
+        'timetables': timetables,
+        'enrollments': enrollments,
+        'enrollment_count': enrollments.count(),
+        'active_enrollments': enrollments.filter(status='ENROLLED').count(),
+    }
+    return render(request, 'dashboard/academics/course_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_syllabi_list(request):
+    """Syllabi management page"""
+    syllabi = Syllabus.objects.all().order_by('-academic_year', '-semester', 'course__code')
+    
+    # Filtering
+    status_filter = request.GET.get('status')
+    academic_year_filter = request.GET.get('academic_year')
+    
+    if status_filter:
+        syllabi = syllabi.filter(status=status_filter)
+    if academic_year_filter:
+        syllabi = syllabi.filter(academic_year=academic_year_filter)
+    
+    context = {
+        'syllabi': syllabi,
+        'total_syllabi': Syllabus.objects.count(),
+        'approved_syllabi': Syllabus.objects.filter(status='APPROVED').count(),
+        'status_choices': Syllabus.SYLLABUS_STATUS,
+        'academic_years': Syllabus.objects.values_list('academic_year', flat=True).distinct().order_by('-academic_year'),
+        'current_filters': {
+            'status': status_filter,
+            'academic_year': academic_year_filter,
+        }
+    }
+    return render(request, 'dashboard/academics/syllabi.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_syllabus_detail(request, syllabus_id):
+    """Syllabus detail page"""
+    syllabus = get_object_or_404(Syllabus, id=syllabus_id)
+    topics = syllabus.topics.all().order_by('week_number', 'order')
+    
+    context = {
+        'syllabus': syllabus,
+        'topics': topics,
+        'topics_count': topics.count(),
+        'total_hours': sum(topic.duration_hours for topic in topics),
+    }
+    return render(request, 'dashboard/academics/syllabus_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_timetables_list(request):
+    """Timetables management page"""
+    timetables = Timetable.objects.all().order_by('academic_year', 'semester', 'day_of_week', 'start_time')
+    
+    # Filtering
+    academic_year_filter = request.GET.get('academic_year')
+    semester_filter = request.GET.get('semester')
+    day_filter = request.GET.get('day')
+    
+    if academic_year_filter:
+        timetables = timetables.filter(academic_year=academic_year_filter)
+    if semester_filter:
+        timetables = timetables.filter(semester=semester_filter)
+    if day_filter:
+        timetables = timetables.filter(day_of_week=day_filter)
+    
+    context = {
+        'timetables': timetables,
+        'total_timetables': Timetable.objects.count(),
+        'active_timetables': Timetable.objects.filter(is_active=True).count(),
+        'academic_years': Timetable.objects.values_list('academic_year', flat=True).distinct().order_by('-academic_year'),
+        'semesters': Timetable.objects.values_list('semester', flat=True).distinct().order_by('semester'),
+        'days_of_week': Timetable.DAYS_OF_WEEK,
+        'current_filters': {
+            'academic_year': academic_year_filter,
+            'semester': semester_filter,
+            'day': day_filter,
+        }
+    }
+    return render(request, 'dashboard/academics/timetables.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_timetable_detail(request, timetable_id):
+    """Timetable detail page"""
+    timetable = get_object_or_404(Timetable, id=timetable_id)
+    
+    # Check for conflicts
+    conflicts = Timetable.objects.filter(
+        academic_year=timetable.academic_year,
+        semester=timetable.semester,
+        day_of_week=timetable.day_of_week,
+        room=timetable.room,
+        is_active=True
+    ).exclude(id=timetable.id)
+    
+    context = {
+        'timetable': timetable,
+        'conflicts': conflicts,
+        'has_conflicts': conflicts.exists(),
+        'duration_minutes': timetable.get_duration_minutes(),
+    }
+    return render(request, 'dashboard/academics/timetable_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_enrollments_list(request):
+    """Enrollments management page"""
+    enrollments = CourseEnrollment.objects.all().order_by('-academic_year', '-semester', 'course__code')
+    
+    # Filtering
+    status_filter = request.GET.get('status')
+    academic_year_filter = request.GET.get('academic_year')
+    semester_filter = request.GET.get('semester')
+    
+    if status_filter:
+        enrollments = enrollments.filter(status=status_filter)
+    if academic_year_filter:
+        enrollments = enrollments.filter(academic_year=academic_year_filter)
+    if semester_filter:
+        enrollments = enrollments.filter(semester=semester_filter)
+    
+    context = {
+        'enrollments': enrollments,
+        'total_enrollments': CourseEnrollment.objects.count(),
+        'active_enrollments': CourseEnrollment.objects.filter(status='ENROLLED').count(),
+        'status_choices': CourseEnrollment.ENROLLMENT_STATUS,
+        'academic_years': CourseEnrollment.objects.values_list('academic_year', flat=True).distinct().order_by('-academic_year'),
+        'semesters': CourseEnrollment.objects.values_list('semester', flat=True).distinct().order_by('semester'),
+        'current_filters': {
+            'status': status_filter,
+            'academic_year': academic_year_filter,
+            'semester': semester_filter,
+        }
+    }
+    return render(request, 'dashboard/academics/enrollments.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_enrollment_detail(request, enrollment_id):
+    """Enrollment detail page"""
+    enrollment = get_object_or_404(CourseEnrollment, id=enrollment_id)
+    
+    context = {
+        'enrollment': enrollment,
+        'student': enrollment.student,
+        'course': enrollment.course,
+    }
+    return render(request, 'dashboard/academics/enrollment_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_calendar_list(request):
+    """Academic calendar management page"""
+    events = AcademicCalendar.objects.all().order_by('start_date')
+    
+    # Filtering
+    event_type_filter = request.GET.get('event_type')
+    academic_year_filter = request.GET.get('academic_year')
+    month_filter = request.GET.get('month')
+    
+    if event_type_filter:
+        events = events.filter(event_type=event_type_filter)
+    if academic_year_filter:
+        events = events.filter(academic_year=academic_year_filter)
+    if month_filter:
+        events = events.filter(start_date__month=month_filter)
+    
+    context = {
+        'events': events,
+        'total_events': AcademicCalendar.objects.count(),
+        'upcoming_events': AcademicCalendar.objects.filter(start_date__gte=timezone.now().date()).count(),
+        'event_type_choices': AcademicCalendar.EVENT_TYPE,
+        'academic_years': AcademicCalendar.objects.values_list('academic_year', flat=True).distinct().order_by('-academic_year'),
+        'months': [
+            (1, 'January'), (2, 'February'), (3, 'March'), (4, 'April'),
+            (5, 'May'), (6, 'June'), (7, 'July'), (8, 'August'),
+            (9, 'September'), (10, 'October'), (11, 'November'), (12, 'December')
+        ],
+        'current_filters': {
+            'event_type': event_type_filter,
+            'academic_year': academic_year_filter,
+            'month': month_filter,
+        }
+    }
+    return render(request, 'dashboard/academics/calendar.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_calendar_detail(request, event_id):
+    """Academic calendar event detail page"""
+    event = get_object_or_404(AcademicCalendar, id=event_id)
+    
+    context = {
+        'event': event,
+        'duration_days': (event.end_date - event.start_date).days + 1,
+    }
+    return render(request, 'dashboard/academics/calendar_detail.html', context)
+
+# ============================================================================
+# ACADEMICS API ENDPOINTS DASHBOARD VIEWS
+# ============================================================================
+
+@login_required
+@user_passes_test(is_admin)
+def academics_api_endpoints(request):
+    """Academics API endpoints overview and testing page"""
+    context = {
+        'api_base_url': '/api/v1/academics/',
+        'endpoints': [
+            {
+                'name': 'Courses API',
+                'url': '/api/v1/academics/courses/',
+                'methods': ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+                'description': 'Manage academic courses',
+                'example_request': {
+                    'method': 'POST',
+                    'url': '/api/v1/academics/courses/',
+                    'data': {
+                        'code': 'CS101',
+                        'title': 'Introduction to Computer Science',
+                        'description': 'Basic concepts of computer science',
+                        'credits': 3,
+                        'level': 'UNDERGRADUATE',
+                        'status': 'ACTIVE'
+                    }
+                }
+            },
+            {
+                'name': 'Syllabi API',
+                'url': '/api/v1/academics/syllabi/',
+                'methods': ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+                'description': 'Manage course syllabi and topics',
+                'example_request': {
+                    'method': 'POST',
+                    'url': '/api/v1/academics/syllabi/',
+                    'data': {
+                        'course': 1,
+                        'academic_year': '2024-2025',
+                        'semester': 'FALL',
+                        'learning_objectives': 'Understand basic programming concepts',
+                        'status': 'DRAFT'
+                    }
+                }
+            },
+            {
+                'name': 'Syllabus Topics API',
+                'url': '/api/v1/academics/syllabus-topics/',
+                'methods': ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+                'description': 'Manage individual syllabus topics',
+                'example_request': {
+                    'method': 'POST',
+                    'url': '/api/v1/academics/syllabus-topics/',
+                    'data': {
+                        'syllabus': 1,
+                        'title': 'Variables and Data Types',
+                        'description': 'Introduction to variables and basic data types',
+                        'week_number': 1,
+                        'hours_allocated': 2
+                    }
+                }
+            },
+            {
+                'name': 'Timetables API',
+                'url': '/api/v1/academics/timetables/',
+                'methods': ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+                'description': 'Manage class timetables and schedules',
+                'example_request': {
+                    'method': 'POST',
+                    'url': '/api/v1/academics/timetables/',
+                    'data': {
+                        'course': 1,
+                        'academic_year': '2024-2025',
+                        'semester': 'FALL',
+                        'day_of_week': 'MONDAY',
+                        'start_time': '09:00:00',
+                        'end_time': '10:30:00',
+                        'room': 'Room 101',
+                        'faculty': 1
+                    }
+                }
+            },
+            {
+                'name': 'Enrollments API',
+                'url': '/api/v1/academics/enrollments/',
+                'methods': ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+                'description': 'Manage student course enrollments',
+                'example_request': {
+                    'method': 'POST',
+                    'url': '/api/v1/academics/enrollments/',
+                    'data': {
+                        'student': 1,
+                        'course': 1,
+                        'academic_year': '2024-2025',
+                        'semester': 'FALL',
+                        'enrollment_date': '2024-08-15',
+                        'status': 'ENROLLED'
+                    }
+                }
+            },
+            {
+                'name': 'Academic Calendar API',
+                'url': '/api/v1/academics/academic-calendar/',
+                'methods': ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+                'description': 'Manage academic calendar events',
+                'example_request': {
+                    'method': 'POST',
+                    'url': '/api/v1/academics/academic-calendar/',
+                    'data': {
+                        'title': 'Fall Semester Begins',
+                        'event_type': 'ACADEMIC',
+                        'start_date': '2024-08-26',
+                        'end_date': '2024-08-26',
+                        'academic_year': '2024-2025',
+                        'description': 'First day of Fall semester classes'
+                    }
+                }
+            }
+        ],
+        'authentication': {
+            'type': 'JWT Token',
+            'header': 'Authorization: Bearer <your_token>',
+            'token_endpoint': '/api/auth/token/',
+            'refresh_endpoint': '/api/auth/token/refresh/'
+        },
+        'pagination': {
+            'default_page_size': 10,
+            'max_page_size': 100,
+            'example': '?page=1&page_size=20'
+        },
+        'filtering': {
+            'search': '?search=computer',
+            'ordering': '?ordering=title',
+            'filtering': '?status=ACTIVE&level=UNDERGRADUATE'
+        }
+    }
+    return render(request, 'dashboard/academics/api_endpoints.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def academics_api_test(request):
+    """API testing interface for academics endpoints"""
+    context = {
+        'api_base_url': '/api/v1/academics/',
+        'test_endpoints': [
+            {
+                'name': 'Test Courses API',
+                'url': '/api/v1/academics/courses/',
+                'method': 'GET',
+                'description': 'Test retrieving all courses'
+            },
+            {
+                'name': 'Test Single Course',
+                'url': '/api/v1/academics/courses/1/',
+                'method': 'GET',
+                'description': 'Test retrieving a specific course'
+            },
+            {
+                'name': 'Test Syllabi API',
+                'url': '/api/v1/academics/syllabi/',
+                'method': 'GET',
+                'description': 'Test retrieving all syllabi'
+            },
+            {
+                'name': 'Test Timetables API',
+                'url': '/api/v1/academics/timetables/',
+                'method': 'GET',
+                'description': 'Test retrieving all timetables'
+            },
+            {
+                'name': 'Test Enrollments API',
+                'url': '/api/v1/academics/enrollments/',
+                'method': 'GET',
+                'description': 'Test retrieving all enrollments'
+            },
+            {
+                'name': 'Test Academic Calendar API',
+                'url': '/api/v1/academics/academic-calendar/',
+                'method': 'GET',
+                'description': 'Test retrieving all calendar events'
+            }
+        ]
+    }
+    return render(request, 'dashboard/academics/api_test.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def enrollment_dashboard(request):
+    """Main enrollment management dashboard"""
+    context = {
+        'total_enrollment_rules': EnrollmentRule.objects.count(),
+        'total_course_assignments': CourseAssignment.objects.count(),
+        'total_faculty_assignments': FacultyAssignment.objects.count(),
+        'total_enrollment_plans': StudentEnrollmentPlan.objects.count(),
+        'total_enrollment_requests': EnrollmentRequest.objects.count(),
+        'total_waitlist_entries': WaitlistEntry.objects.filter(is_active=True).count(),
+        'pending_requests': EnrollmentRequest.objects.filter(status='PENDING').count(),
+        'active_enrollments': CourseEnrollment.objects.filter(status='ENROLLED').count(),
+        'recent_requests': EnrollmentRequest.objects.order_by('-request_date')[:5],
+        'recent_plans': StudentEnrollmentPlan.objects.order_by('-created_at')[:5],
+    }
+    return render(request, 'dashboard/enrollment/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def enrollment_rules_list(request):
+    """List all enrollment rules"""
+    rules = EnrollmentRule.objects.all().order_by('-academic_year', '-semester', 'rule_type')
+    return render(request, 'dashboard/enrollment/rules.html', {'rules': rules})
+
+
+@login_required
+@user_passes_test(is_admin)
+def enrollment_rule_detail(request, rule_id):
+    """Detail view for enrollment rule"""
+    rule = get_object_or_404(EnrollmentRule, pk=rule_id)
+    return render(request, 'dashboard/enrollment/rule_detail.html', {'rule': rule})
+
+
+@login_required
+@user_passes_test(is_admin)
+def course_assignments_list(request):
+    """List all course assignments"""
+    assignments = CourseAssignment.objects.all().order_by('-academic_year', '-semester', 'course__code')
+    return render(request, 'dashboard/enrollment/course_assignments.html', {'assignments': assignments})
+
+
+@login_required
+@user_passes_test(is_admin)
+def course_assignment_detail(request, assignment_id):
+    """Detail view for course assignment"""
+    assignment = get_object_or_404(CourseAssignment, pk=assignment_id)
+    return render(request, 'dashboard/enrollment/course_assignment_detail.html', {'assignment': assignment})
+
+
+@login_required
+@user_passes_test(is_admin)
+def faculty_assignments_list(request):
+    """List all faculty assignments"""
+    assignments = FacultyAssignment.objects.all().order_by('-assignment_date', 'faculty__first_name')
+    return render(request, 'dashboard/enrollment/faculty_assignments.html', {'assignments': assignments})
+
+
+@login_required
+@user_passes_test(is_admin)
+def faculty_assignment_detail(request, assignment_id):
+    """Detail view for faculty assignment"""
+    assignment = get_object_or_404(FacultyAssignment, pk=assignment_id)
+    return render(request, 'dashboard/enrollment/faculty_assignment_detail.html', {'assignment': assignment})
+
+
+@login_required
+@user_passes_test(is_admin)
+def enrollment_plans_list(request):
+    """List all student enrollment plans"""
+    plans = StudentEnrollmentPlan.objects.all().order_by('-academic_year', '-semester', 'student__roll_number')
+    return render(request, 'dashboard/enrollment/enrollment_plans.html', {'plans': plans})
+
+
+@login_required
+@user_passes_test(is_admin)
+def enrollment_plan_detail(request, plan_id):
+    """Detail view for enrollment plan"""
+    plan = get_object_or_404(StudentEnrollmentPlan, pk=plan_id)
+    return render(request, 'dashboard/enrollment/enrollment_plan_detail.html', {'plan': plan})
+
+
+@login_required
+@user_passes_test(is_admin)
+def enrollment_requests_list(request):
+    """List all enrollment requests"""
+    requests = EnrollmentRequest.objects.all().order_by('-request_date')
+    return render(request, 'dashboard/enrollment/enrollment_requests.html', {'requests': requests})
+
+
+@login_required
+@user_passes_test(is_admin)
+def enrollment_request_detail(request, request_id):
+    """Detail view for enrollment request"""
+    enrollment_request = get_object_or_404(EnrollmentRequest, pk=request_id)
+    return render(request, 'dashboard/enrollment/enrollment_request_detail.html', {'enrollment_request': enrollment_request})
+
+
+@login_required
+@user_passes_test(is_admin)
+def waitlist_entries_list(request):
+    """List all waitlist entries"""
+    entries = WaitlistEntry.objects.all().order_by('position', 'added_date')
+    return render(request, 'dashboard/enrollment/waitlist_entries.html', {'entries': entries})
+
+
+@login_required
+@user_passes_test(is_admin)
+def waitlist_entry_detail(request, entry_id):
+    """Detail view for waitlist entry"""
+    entry = get_object_or_404(WaitlistEntry, pk=entry_id)
+    return render(request, 'dashboard/enrollment/waitlist_entry_detail.html', {'entry': entry})
+
+
+@login_required
+@user_passes_test(is_admin)
+def departments_list(request):
+    """List all departments"""
+    departments = Department.objects.all().order_by('code', 'name')
+    return render(request, 'dashboard/enrollment/departments.html', {'departments': departments})
+
+
+@login_required
+@user_passes_test(is_admin)
+def department_detail(request, department_id):
+    """Detail view for department"""
+    department = get_object_or_404(Department, pk=department_id)
+    return render(request, 'dashboard/enrollment/department_detail.html', {'department': department})
+
+
+@login_required
+@user_passes_test(is_admin)
+def academic_programs_list(request):
+    """List all academic programs"""
+    programs = AcademicProgram.objects.all().order_by('level', 'code', 'name')
+    return render(request, 'dashboard/enrollment/academic_programs.html', {'programs': programs})
+
+
+@login_required
+@user_passes_test(is_admin)
+def academic_program_detail(request, program_id):
+    """Detail view for academic program"""
+    program = get_object_or_404(AcademicProgram, pk=program_id)
+    return render(request, 'dashboard/enrollment/academic_program_detail.html', {'program': program})
+
+
+@login_required
+@user_passes_test(is_admin)
+def course_sections_list(request):
+    """List all course sections"""
+    sections = CourseSection.objects.all().order_by('course__code', 'section_number', 'academic_year', 'semester')
+    return render(request, 'dashboard/enrollment/course_sections.html', {'sections': sections})
+
+
+@login_required
+@user_passes_test(is_admin)
+def course_section_detail(request, section_id):
+    """Detail view for course section"""
+    section = get_object_or_404(CourseSection, pk=section_id)
+    return render(request, 'dashboard/enrollment/course_section_detail.html', {'section': section})
+
+
+# ============================================================================
+# ATTENDANCE DASHBOARD VIEWS
+# ============================================================================
+
+@login_required
+@user_passes_test(is_admin)
+def attendance_sessions(request):
+    """List attendance sessions with filters and quick actions."""
+    sessions = AttendanceSession.objects.select_related('course_section').order_by('-date', 'start_time')
+
+    # Filters
+    section_id = request.GET.get('section_id')
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
+    is_cancelled = request.GET.get('is_cancelled')
+
+    if section_id:
+        sessions = sessions.filter(course_section_id=section_id)
+    if date_from:
+        sessions = sessions.filter(date__gte=date_from)
+    if date_to:
+        sessions = sessions.filter(date__lte=date_to)
+    if is_cancelled in ['true', 'false']:
+        sessions = sessions.filter(is_cancelled=(is_cancelled == 'true'))
+
+    context = {
+        'sessions': sessions[:200],
+        'sections': CourseSection.objects.all().order_by('course__code', 'section_number'),
+    }
+    return render(request, 'dashboard/attendance/sessions.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def attendance_session_detail(request, session_id):
+    """Show a single session and all attendance records."""
+    session = get_object_or_404(AttendanceSession.objects.select_related('course_section'), pk=session_id)
+    records = AttendanceRecord.objects.filter(session=session).select_related('student').order_by('student__roll_number')
+    context = {
+        'session': session,
+        'records': records,
+        'status_choices': AttendanceRecord.STATUS_CHOICES,
+    }
+    return render(request, 'dashboard/attendance/session_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def attendance_mark(request, session_id):
+    """Handle marking attendance for a session (AJAX or form POST)."""
+    session = get_object_or_404(AttendanceSession, pk=session_id)
+    if request.method == 'POST':
+        try:
+            student_id = request.POST.get('student_id')
+            status_value = request.POST.get('status')
+            remarks = request.POST.get('remarks', '')
+
+            if status_value not in dict(AttendanceRecord.STATUS_CHOICES):
+                return JsonResponse({'success': False, 'error': 'Invalid status'}, status=400)
+
+            record, _ = AttendanceRecord.objects.get_or_create(session=session, student_id=student_id)
+            record.status = status_value
+            record.remarks = remarks
+            record.save()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+
+    # GET fallthrough
+    return attendance_session_detail(request, session_id)
+
+
+@login_required
+@user_passes_test(is_admin)
+def attendance_generate_sessions(request):
+    """Form to generate sessions for a given date range from active timetables."""
+    message = None
+    error = None
+    if request.method == 'POST':
+        try:
+            start = request.POST.get('start')
+            end = request.POST.get('end')
+            section_id = request.POST.get('section_id') or None
+
+            # Use the same logic as the management command
+            from datetime import date, timedelta
+            start_date = date.fromisoformat(start)
+            end_date = date.fromisoformat(end)
+            if end_date < start_date:
+                raise ValueError('End date must be after start date')
+
+            days_map = {'MON': 0, 'TUE': 1, 'WED': 2, 'THU': 3, 'FRI': 4, 'SAT': 5, 'SUN': 6}
+            timetables = Timetable.objects.filter(is_active=True)
+            if section_id:
+                timetables = timetables.filter(course_section_id=section_id)
+
+            by_weekday = {}
+            for t in timetables.select_related('course_section'):
+                by_weekday.setdefault(days_map[t.day_of_week], []).append(t)
+
+            created_count = 0
+            current = start_date
+            while current <= end_date:
+                weekday = current.weekday()
+                for t in by_weekday.get(weekday, []):
+                    _, created = AttendanceSession.objects.get_or_create(
+                        course_section=t.course_section,
+                        date=current,
+                        start_time=t.start_time,
+                        defaults={'end_time': t.end_time, 'room': t.room, 'timetable': t}
+                    )
+                    if created:
+                        created_count += 1
+                current += timedelta(days=1)
+
+            message = f'Created {created_count} attendance sessions.'
+        except Exception as exc:
+            error = str(exc)
+
+    context = {
+        'sections': CourseSection.objects.all().order_by('course__code', 'section_number'),
+        'message': message,
+        'error': error,
+    }
+    return render(request, 'dashboard/attendance/generate.html', context)
+
+
+# ============================================================================
+# EXAM MANAGEMENT DASHBOARD VIEWS
+# ============================================================================
+
+@login_required
+@user_passes_test(is_admin)
+def exams_dashboard(request):
+    """Main exam management dashboard."""
+    from exams.models import (
+        ExamSession, ExamSchedule, ExamRegistration, HallTicket,
+        ExamAttendance, ExamResult, StudentDue, ExamViolation,
+        ExamRoom, ExamStaffAssignment, ExamRoomAllocation
+    )
+    from students.models import Student
+    from academics.models import Course
+    from faculty.models import Faculty
+    from django.utils import timezone
+    from datetime import timedelta
+    
+    # Get current date and time
+    now = timezone.now()
+    today = now.date()
+    
+    # Calculate statistics
+    active_sessions_count = ExamSession.objects.filter(
+        status__in=['PUBLISHED', 'ONGOING'],
+        start_date__lte=today,
+        end_date__gte=today
+    ).count()
+    
+    upcoming_exams_count = ExamSchedule.objects.filter(
+        exam_date__gte=today,
+        status='SCHEDULED'
+    ).count()
+    
+    total_registrations_count = ExamRegistration.objects.count()
+    
+    pending_approvals_count = ExamRegistration.objects.filter(
+        status='PENDING'
+    ).count()
+    
+    # Get upcoming exams for display
+    upcoming_exams = ExamSchedule.objects.filter(
+        exam_date__gte=today,
+        status='SCHEDULED'
+    ).select_related('course', 'exam_session').order_by('exam_date', 'start_time')[:5]
+    
+    # Get recent activities (simplified for now)
+    recent_activities = []
+    
+    # Quick statistics
+    total_students_count = Student.objects.count()
+    total_courses_count = Course.objects.count()
+    total_rooms_count = ExamRoom.objects.count()
+    total_faculty_count = Faculty.objects.count()
+    total_violations_count = ExamViolation.objects.count()
+    total_results_count = ExamResult.objects.count()
+    
+    context = {
+        'active_sessions_count': active_sessions_count,
+        'upcoming_exams_count': upcoming_exams_count,
+        'total_registrations_count': total_registrations_count,
+        'pending_approvals_count': pending_approvals_count,
+        'upcoming_exams': upcoming_exams,
+        'recent_activities': recent_activities,
+        'total_students_count': total_students_count,
+        'total_courses_count': total_courses_count,
+        'total_rooms_count': total_rooms_count,
+        'total_faculty_count': total_faculty_count,
+        'total_violations_count': total_violations_count,
+        'total_results_count': total_results_count,
+    }
+    
+    return render(request, 'dashboard/exams/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_sessions_list(request):
+    """List all exam sessions."""
+    from exams.models import ExamSession
+    
+    if request.method == 'POST':
+        # Handle session creation
+        try:
+            from datetime import datetime
+            from django.utils import timezone
+            
+            # Parse datetime strings
+            registration_start = datetime.fromisoformat(request.POST['registration_start'].replace('Z', '+00:00'))
+            registration_end = datetime.fromisoformat(request.POST['registration_end'].replace('Z', '+00:00'))
+            
+            # Make timezone-aware
+            registration_start = timezone.make_aware(registration_start)
+            registration_end = timezone.make_aware(registration_end)
+            
+            session = ExamSession.objects.create(
+                name=request.POST['name'],
+                session_type=request.POST['session_type'],
+                academic_year=request.POST['academic_year'],
+                semester=int(request.POST['semester']),
+                start_date=request.POST['start_date'],
+                end_date=request.POST['end_date'],
+                registration_start=registration_start,
+                registration_end=registration_end,
+                description=request.POST.get('description', ''),
+                status='DRAFT'
+            )
+            
+            messages.success(request, f'Exam session "{session.name}" created successfully!')
+            return redirect('dashboard:exams_sessions')
+            
+        except Exception as e:
+            messages.error(request, f'Error creating exam session: {str(e)}')
+    
+    exam_sessions = ExamSession.objects.all().order_by('-academic_year', '-semester', '-start_date')
+    
+    context = {
+        'exam_sessions': exam_sessions,
+    }
+    
+    return render(request, 'dashboard/exams/sessions_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_session_detail(request, session_id):
+    """Show detailed information about an exam session."""
+    from exams.models import ExamSession
+    
+    session = get_object_or_404(ExamSession, pk=session_id)
+    
+    context = {
+        'session': session,
+    }
+    
+    return render(request, 'dashboard/exams/session_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_schedules_list(request):
+    """List all exam schedules."""
+    from exams.models import ExamSchedule
+    
+    exam_schedules = ExamSchedule.objects.all().select_related('exam_session', 'course').order_by('exam_date', 'start_time')
+    
+    context = {
+        'exam_schedules': exam_schedules,
+    }
+    
+    return render(request, 'dashboard/exams/schedules_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_schedule_detail(request, schedule_id):
+    """Show detailed information about an exam schedule."""
+    from exams.models import ExamSchedule
+    
+    schedule = get_object_or_404(ExamSchedule, pk=schedule_id)
+    
+    context = {
+        'schedule': schedule,
+    }
+    
+    return render(request, 'dashboard/exams/schedule_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_rooms_list(request):
+    """List all exam rooms."""
+    from exams.models import ExamRoom
+    
+    exam_rooms = ExamRoom.objects.all().order_by('building', 'floor', 'name')
+    
+    context = {
+        'exam_rooms': exam_rooms,
+    }
+    
+    return render(request, 'dashboard/exams/rooms_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_room_detail(request, room_id):
+    """Show detailed information about an exam room."""
+    from exams.models import ExamRoom
+    
+    room = get_object_or_404(ExamRoom, pk=room_id)
+    
+    context = {
+        'room': room,
+    }
+    
+    return render(request, 'dashboard/exams/room_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_registrations_list(request):
+    """List all exam registrations."""
+    from exams.models import ExamRegistration
+    
+    exam_registrations = ExamRegistration.objects.all().select_related('student', 'exam_schedule__course').order_by('-registration_date')
+    
+    context = {
+        'exam_registrations': exam_registrations,
+    }
+    
+    return render(request, 'dashboard/exams/registrations_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_registration_detail(request, registration_id):
+    """Show detailed information about an exam registration."""
+    from exams.models import ExamRegistration
+    
+    registration = get_object_or_404(ExamRegistration, pk=registration_id)
+    
+    context = {
+        'registration': registration,
+    }
+    
+    return render(request, 'dashboard/exams/registration_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_hall_tickets_list(request):
+    """List all hall tickets."""
+    from exams.models import HallTicket
+    
+    hall_tickets = HallTicket.objects.all().select_related('exam_registration__student', 'exam_registration__exam_schedule__course').order_by('-generated_date')
+    
+    context = {
+        'hall_tickets': hall_tickets,
+    }
+    
+    return render(request, 'dashboard/exams/hall_tickets_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_hall_ticket_detail(request, ticket_id):
+    """Show detailed information about a hall ticket."""
+    from exams.models import HallTicket
+    
+    ticket = get_object_or_404(HallTicket, pk=ticket_id)
+    
+    context = {
+        'ticket': ticket,
+    }
+    
+    return render(request, 'dashboard/exams/hall_ticket_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_attendance_list(request):
+    """List all exam attendance records."""
+    from exams.models import ExamAttendance
+    
+    exam_attendance = ExamAttendance.objects.all().select_related('exam_registration__student', 'exam_registration__exam_schedule__course').order_by('-created_at')
+    
+    context = {
+        'exam_attendance': exam_attendance,
+    }
+    
+    return render(request, 'dashboard/exams/attendance_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_attendance_detail(request, attendance_id):
+    """Show detailed information about an exam attendance record."""
+    from exams.models import ExamAttendance
+    
+    attendance = get_object_or_404(ExamAttendance, pk=attendance_id)
+    
+    context = {
+        'attendance': attendance,
+    }
+    
+    return render(request, 'dashboard/exams/attendance_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_results_list(request):
+    """List all exam results."""
+    from exams.models import ExamResult
+    
+    exam_results = ExamResult.objects.all().select_related('exam_registration__student', 'exam_registration__exam_schedule__course').order_by('-evaluated_at', '-created_at')
+    
+    context = {
+        'exam_results': exam_results,
+    }
+    
+    return render(request, 'dashboard/exams/results_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_result_detail(request, result_id):
+    """Show detailed information about an exam result."""
+    from exams.models import ExamResult
+    
+    result = get_object_or_404(ExamResult, pk=result_id)
+    
+    context = {
+        'result': result,
+    }
+    
+    return render(request, 'dashboard/exams/result_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_dues_list(request):
+    """List all student dues."""
+    from exams.models import StudentDue
+    
+    student_dues = StudentDue.objects.all().select_related('student').order_by('-due_date')
+    
+    context = {
+        'student_dues': student_dues,
+    }
+    
+    return render(request, 'dashboard/exams/dues_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_due_detail(request, due_id):
+    """Show detailed information about a student due."""
+    from exams.models import StudentDue
+    
+    due = get_object_or_404(StudentDue, pk=due_id)
+    
+    context = {
+        'due': due,
+    }
+    
+    return render(request, 'dashboard/exams/due_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_violations_list(request):
+    """List all exam violations."""
+    from exams.models import ExamViolation
+    
+    exam_violations = ExamViolation.objects.all().select_related('exam_registration__student', 'exam_registration__exam_schedule__course').order_by('-reported_at')
+    
+    context = {
+        'exam_violations': exam_violations,
+    }
+    
+    return render(request, 'dashboard/exams/violations_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_violation_detail(request, violation_id):
+    """Show detailed information about an exam violation."""
+    from exams.models import ExamViolation
+    
+    violation = get_object_or_404(ExamViolation, pk=violation_id)
+    
+    context = {
+        'violation': violation,
+    }
+    
+    return render(request, 'dashboard/exams/violation_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_staff_assignments_list(request):
+    """List all staff assignments."""
+    from exams.models import ExamStaffAssignment
+    
+    staff_assignments = ExamStaffAssignment.objects.all().select_related('faculty', 'exam_schedule__course').order_by('-assigned_date')
+    
+    context = {
+        'staff_assignments': staff_assignments,
+    }
+    
+    return render(request, 'dashboard/exams/staff_assignments_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_staff_assignment_detail(request, assignment_id):
+    """Show detailed information about a staff assignment."""
+    from exams.models import ExamStaffAssignment
+    
+    assignment = get_object_or_404(ExamStaffAssignment, pk=assignment_id)
+    
+    context = {
+        'assignment': assignment,
+    }
+    
+    return render(request, 'dashboard/exams/staff_assignment_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_room_allocations_list(request):
+    """List all room allocations."""
+    from exams.models import ExamRoomAllocation, ExamSchedule, ExamRoom
+    from students.models import Student
+    from academics.models import Department, AcademicProgram
+    
+    room_allocations = ExamRoomAllocation.objects.all().select_related('exam_schedule__course', 'exam_room').order_by('-created_at')
+    
+    # Get data for the create modal
+    students = Student.objects.filter(status='ACTIVE').order_by('roll_number')
+    exam_schedules = ExamSchedule.objects.all().select_related('exam_session', 'course').order_by('-exam_date')
+    exam_rooms = ExamRoom.objects.filter(is_active=True).order_by('building', 'name')
+    
+    # Get filter options
+    departments = Department.objects.filter(is_active=True).order_by('name')
+    academic_programs = AcademicProgram.objects.filter(is_active=True).order_by('name')
+    
+    # Get unique academic years and sections from students
+    academic_years = Student.objects.values_list('academic_year', flat=True).distinct().exclude(academic_year__isnull=True).exclude(academic_year='').order_by('-academic_year')
+    sections = Student.objects.values_list('section', flat=True).distinct().exclude(section__isnull=True).exclude(section='').order_by('section')
+    
+    context = {
+        'room_allocations': room_allocations,
+        'students': students,
+        'exam_schedules': exam_schedules,
+        'exam_rooms': exam_rooms,
+        'departments': departments,
+        'academic_programs': academic_programs,
+        'academic_years': academic_years,
+        'sections': sections,
+    }
+    
+    return render(request, 'dashboard/exams/room_allocations_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def exams_room_allocation_detail(request, allocation_id):
+    """Show detailed information about a room allocation."""
+    from exams.models import ExamRoomAllocation
+    
+    allocation = get_object_or_404(ExamRoomAllocation, pk=allocation_id)
+    
+    context = {
+        'allocation': allocation,
+    }
+    
+    return render(request, 'dashboard/exams/room_allocation_detail.html', context)
+
+# =============================================================================
+# FEE MANAGEMENT DASHBOARD VIEWS
+# =============================================================================
+
+@login_required
+@user_passes_test(is_admin)
+def fees_dashboard(request):
+    """Main fee management dashboard with statistics and overview"""
+    
+    # Fee statistics
+    total_fee_categories = FeeCategory.objects.filter(is_active=True).count()
+    total_fee_structures = FeeStructure.objects.filter(is_active=True).count()
+    total_student_fees = StudentFee.objects.count()
+    total_payments = Payment.objects.filter(status='COMPLETED').count()
+    
+    # Financial statistics
+    total_fees_due = StudentFee.objects.aggregate(total=models.Sum('amount_due'))['total'] or 0
+    total_fees_paid = StudentFee.objects.aggregate(total=models.Sum('amount_paid'))['total'] or 0
+    total_balance = total_fees_due - total_fees_paid
+    
+    # Status counts
+    pending_fees = StudentFee.objects.filter(status='PENDING').count()
+    paid_fees = StudentFee.objects.filter(status='PAID').count()
+    partial_fees = StudentFee.objects.filter(status='PARTIAL').count()
+    overdue_fees = StudentFee.objects.filter(due_date__lt=timezone.now().date(), status='PENDING').count()
+    
+    # Recent activities
+    recent_payments = Payment.objects.filter(status='COMPLETED').select_related(
+        'student_fee__student', 'collected_by'
+    ).order_by('-payment_date')[:10]
+    
+    recent_student_fees = StudentFee.objects.select_related(
+        'student', 'fee_structure_detail__fee_category'
+    ).order_by('-created_at')[:10]
+    
+    # Payment method distribution
+    payment_methods = Payment.objects.filter(status='COMPLETED').values('payment_method').annotate(
+        count=Count('id'),
+        total_amount=models.Sum('amount')
+    ).order_by('-total_amount')
+    
+    # Fee category breakdown
+    fee_category_breakdown = StudentFee.objects.values(
+        'fee_structure_detail__fee_category__name'
+    ).annotate(
+        total_due=models.Sum('amount_due'),
+        total_paid=models.Sum('amount_paid'),
+        count=Count('id')
+    ).order_by('-total_due')
+    
+    # Academic year breakdown
+    academic_year_breakdown = StudentFee.objects.values('academic_year').annotate(
+        total_due=models.Sum('amount_due'),
+        total_paid=models.Sum('amount_paid'),
+        count=Count('id')
+    ).order_by('-academic_year')
+    
+    context = {
+        'total_fee_categories': total_fee_categories,
+        'total_fee_structures': total_fee_structures,
+        'total_student_fees': total_student_fees,
+        'total_payments': total_payments,
+        'total_fees_due': total_fees_due,
+        'total_fees_paid': total_fees_paid,
+        'total_balance': total_balance,
+        'pending_fees': pending_fees,
+        'paid_fees': paid_fees,
+        'partial_fees': partial_fees,
+        'overdue_fees': overdue_fees,
+        'recent_payments': recent_payments,
+        'recent_student_fees': recent_student_fees,
+        'payment_methods': payment_methods,
+        'fee_category_breakdown': fee_category_breakdown,
+        'academic_year_breakdown': academic_year_breakdown,
+    }
+    
+    return render(request, 'dashboard/fees/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_categories_list(request):
+    """List all fee categories"""
+    categories = FeeCategory.objects.all().order_by('display_order', 'name')
+    
+    if request.method == 'POST':
+        if 'create' in request.POST:
+            name = request.POST.get('name')
+            description = request.POST.get('description')
+            display_order = request.POST.get('display_order', 0)
+            is_active = 'is_active' in request.POST
+            
+            if name:
+                FeeCategory.objects.create(
+                    name=name,
+                    description=description,
+                    display_order=display_order,
+                    is_active=is_active
+                )
+                return redirect('dashboard:fees_categories_list')
+        
+        elif 'update' in request.POST:
+            category_id = request.POST.get('category_id')
+            name = request.POST.get('name')
+            description = request.POST.get('description')
+            display_order = request.POST.get('display_order', 0)
+            is_active = 'is_active' in request.POST
+            
+            if category_id and name:
+                try:
+                    category = FeeCategory.objects.get(id=category_id)
+                    category.name = name
+                    category.description = description
+                    category.display_order = display_order
+                    category.is_active = is_active
+                    category.save()
+                except FeeCategory.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_categories_list')
+        
+        elif 'delete' in request.POST:
+            category_id = request.POST.get('category_id')
+            if category_id:
+                try:
+                    FeeCategory.objects.get(id=category_id).delete()
+                except FeeCategory.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_categories_list')
+    
+    context = {
+        'categories': categories,
+    }
+    
+    return render(request, 'dashboard/fees/categories_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_structures_list(request):
+    """List all fee structures"""
+    structures = FeeStructure.objects.all().select_related().prefetch_related('fee_details').order_by('-academic_year', 'grade_level')
+    
+    if request.method == 'POST':
+        if 'create' in request.POST:
+            name = request.POST.get('name')
+            academic_year = request.POST.get('academic_year')
+            grade_level = request.POST.get('grade_level')
+            description = request.POST.get('description')
+            is_active = 'is_active' in request.POST
+            
+            if name and academic_year and grade_level:
+                FeeStructure.objects.create(
+                    name=name,
+                    academic_year=academic_year,
+                    grade_level=grade_level,
+                    description=description,
+                    is_active=is_active
+                )
+                return redirect('dashboard:fees_structures_list')
+        
+        elif 'update' in request.POST:
+            structure_id = request.POST.get('structure_id')
+            name = request.POST.get('name')
+            academic_year = request.POST.get('academic_year')
+            grade_level = request.POST.get('grade_level')
+            description = request.POST.get('description')
+            is_active = 'is_active' in request.POST
+            
+            if structure_id and name and academic_year and grade_level:
+                try:
+                    structure = FeeStructure.objects.get(id=structure_id)
+                    structure.name = name
+                    structure.academic_year = academic_year
+                    structure.grade_level = grade_level
+                    structure.description = description
+                    structure.is_active = is_active
+                    structure.save()
+                except FeeStructure.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_structures_list')
+        
+        elif 'delete' in request.POST:
+            structure_id = request.POST.get('structure_id')
+            if structure_id:
+                try:
+                    FeeStructure.objects.get(id=structure_id).delete()
+                except FeeStructure.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_structures_list')
+    
+    context = {
+        'structures': structures,
+        'academic_year_choices': FeeStructure.ACADEMIC_YEAR_CHOICES,
+        'grade_choices': FeeStructure.GRADE_CHOICES,
+    }
+    
+    return render(request, 'dashboard/fees/structures_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_structure_detail(request, structure_id):
+    """Show detailed information about a fee structure"""
+    structure = get_object_or_404(FeeStructure, pk=structure_id)
+    fee_details = structure.fee_details.all().select_related('fee_category').order_by('fee_category__display_order')
+    
+    if request.method == 'POST':
+        if 'create_detail' in request.POST:
+            fee_category_id = request.POST.get('fee_category_id')
+            amount = request.POST.get('amount')
+            frequency = request.POST.get('frequency')
+            is_optional = 'is_optional' in request.POST
+            due_date = request.POST.get('due_date') or None
+            late_fee_amount = request.POST.get('late_fee_amount', 0)
+            late_fee_percentage = request.POST.get('late_fee_percentage', 0)
+            
+            if fee_category_id and amount:
+                try:
+                    fee_category = FeeCategory.objects.get(id=fee_category_id)
+                    FeeStructureDetail.objects.create(
+                        fee_structure=structure,
+                        fee_category=fee_category,
+                        amount=amount,
+                        frequency=frequency,
+                        is_optional=is_optional,
+                        due_date=due_date,
+                        late_fee_amount=late_fee_amount,
+                        late_fee_percentage=late_fee_percentage
+                    )
+                except FeeCategory.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_structure_detail', structure_id=structure_id)
+        
+        elif 'update_detail' in request.POST:
+            detail_id = request.POST.get('detail_id')
+            amount = request.POST.get('amount')
+            frequency = request.POST.get('frequency')
+            is_optional = 'is_optional' in request.POST
+            due_date = request.POST.get('due_date') or None
+            late_fee_amount = request.POST.get('late_fee_amount', 0)
+            late_fee_percentage = request.POST.get('late_fee_percentage', 0)
+            
+            if detail_id and amount:
+                try:
+                    detail = FeeStructureDetail.objects.get(id=detail_id)
+                    detail.amount = amount
+                    detail.frequency = frequency
+                    detail.is_optional = is_optional
+                    detail.due_date = due_date
+                    detail.late_fee_amount = late_fee_amount
+                    detail.late_fee_percentage = late_fee_percentage
+                    detail.save()
+                except FeeStructureDetail.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_structure_detail', structure_id=structure_id)
+        
+        elif 'delete_detail' in request.POST:
+            detail_id = request.POST.get('detail_id')
+            if detail_id:
+                try:
+                    FeeStructureDetail.objects.get(id=detail_id).delete()
+                except FeeStructureDetail.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_structure_detail', structure_id=structure_id)
+    
+    # Get available fee categories for creating new details
+    available_categories = FeeCategory.objects.filter(is_active=True).exclude(
+        id__in=fee_details.values_list('fee_category_id', flat=True)
+    )
+    
+    context = {
+        'structure': structure,
+        'fee_details': fee_details,
+        'available_categories': available_categories,
+        'frequency_choices': FeeStructureDetail.FREQUENCY_CHOICES,
+    }
+    
+    return render(request, 'dashboard/fees/structure_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_student_fees_list(request):
+    """List all student fees with filtering and search"""
+    student_fees = StudentFee.objects.all().select_related(
+        'student', 'fee_structure_detail__fee_category', 'fee_structure_detail__fee_structure'
+    ).order_by('-created_at')
+    
+    # Filtering
+    status_filter = request.GET.get('status')
+    academic_year_filter = request.GET.get('academic_year')
+    grade_filter = request.GET.get('grade_level')
+    category_filter = request.GET.get('fee_category')
+    search_query = request.GET.get('search')
+    
+    if status_filter:
+        student_fees = student_fees.filter(status=status_filter)
+    
+    if academic_year_filter:
+        student_fees = student_fees.filter(academic_year=academic_year_filter)
+    
+    if grade_filter:
+        student_fees = student_fees.filter(fee_structure_detail__fee_structure__grade_level=grade_filter)
+    
+    if category_filter:
+        student_fees = student_fees.filter(fee_structure_detail__fee_category_id=category_filter)
+    
+    if search_query:
+        student_fees = student_fees.filter(
+            Q(student__roll_number__icontains=search_query) |
+            Q(student__first_name__icontains=search_query) |
+            Q(student__last_name__icontains=search_query)
+        )
+    
+    # Get filter options
+    status_choices = StudentFee.STATUS_CHOICES
+    academic_years = StudentFee.objects.values_list('academic_year', flat=True).distinct().order_by('-academic_year')
+    grade_levels = FeeStructure.objects.values_list('grade_level', flat=True).distinct().order_by('grade_level')
+    fee_categories = FeeCategory.objects.filter(is_active=True).order_by('name')
+    
+    context = {
+        'student_fees': student_fees,
+        'status_choices': status_choices,
+        'academic_years': academic_years,
+        'grade_levels': grade_levels,
+        'fee_categories': fee_categories,
+        'current_filters': {
+            'status': status_filter,
+            'academic_year': academic_year_filter,
+            'grade_level': grade_filter,
+            'fee_category': category_filter,
+            'search': search_query,
+        }
+    }
+    
+    return render(request, 'dashboard/fees/student_fees_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_student_fee_detail(request, student_fee_id):
+    """Show detailed information about a student fee"""
+    student_fee = get_object_or_404(StudentFee, pk=student_fee_id)
+    payments = student_fee.payments.all().order_by('-payment_date')
+    waivers = student_fee.waivers.filter(is_active=True).order_by('-created_at')
+    discounts = student_fee.discounts.filter(is_active=True).order_by('-created_at')
+    receipts = student_fee.receipts.all().order_by('-generated_date')
+    
+    context = {
+        'student_fee': student_fee,
+        'payments': payments,
+        'waivers': waivers,
+        'discounts': discounts,
+        'receipts': receipts,
+    }
+    
+    return render(request, 'dashboard/fees/student_fee_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_payments_list(request):
+    """List all payments with filtering and search"""
+    payments = Payment.objects.all().select_related(
+        'student_fee__student', 'student_fee__fee_structure_detail__fee_category', 'collected_by'
+    ).order_by('-payment_date')
+    
+    # Filtering
+    status_filter = request.GET.get('status')
+    method_filter = request.GET.get('payment_method')
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
+    search_query = request.GET.get('search')
+    
+    if status_filter:
+        payments = payments.filter(status=status_filter)
+    
+    if method_filter:
+        payments = payments.filter(payment_method=method_filter)
+    
+    if date_from:
+        payments = payments.filter(payment_date__date__gte=date_from)
+    
+    if date_to:
+        payments = payments.filter(payment_date__date__lte=date_to)
+    
+    if search_query:
+        payments = payments.filter(
+            Q(receipt_number__icontains=search_query) |
+            Q(transaction_id__icontains=search_query) |
+            Q(student_fee__student__roll_number__icontains=search_query) |
+            Q(student_fee__student__first_name__icontains=search_query)
+        )
+    
+    # Get filter options
+    status_choices = Payment.PAYMENT_STATUS_CHOICES
+    method_choices = Payment.PAYMENT_METHOD_CHOICES
+    
+    context = {
+        'payments': payments,
+        'status_choices': status_choices,
+        'method_choices': method_choices,
+        'current_filters': {
+            'status': status_filter,
+            'payment_method': method_filter,
+            'date_from': date_from,
+            'date_to': date_to,
+            'search': search_query,
+        }
+    }
+    
+    return render(request, 'dashboard/fees/payments_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_payment_detail(request, payment_id):
+    """Show detailed information about a payment"""
+    payment = get_object_or_404(Payment, pk=payment_id)
+    receipts = payment.receipts.all().order_by('-generated_date')
+    
+    context = {
+        'payment': payment,
+        'receipts': receipts,
+    }
+    
+    return render(request, 'dashboard/fees/payment_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_waivers_list(request):
+    """List all fee waivers"""
+    waivers = FeeWaiver.objects.all().select_related(
+        'student_fee__student', 'approved_by'
+    ).order_by('-created_at')
+    
+    if request.method == 'POST':
+        if 'create' in request.POST:
+            student_fee_id = request.POST.get('student_fee_id')
+            waiver_type = request.POST.get('waiver_type')
+            amount = request.POST.get('amount')
+            percentage = request.POST.get('percentage')
+            reason = request.POST.get('reason')
+            is_active = 'is_active' in request.POST
+            
+            if student_fee_id and waiver_type and amount and reason:
+                try:
+                    student_fee = StudentFee.objects.get(id=student_fee_id)
+                    FeeWaiver.objects.create(
+                        student_fee=student_fee,
+                        waiver_type=waiver_type,
+                        amount=amount,
+                        percentage=percentage,
+                        reason=reason,
+                        is_active=is_active,
+                        approved_by=request.user,
+                        approved_date=timezone.now()
+                    )
+                except StudentFee.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_waivers_list')
+        
+        elif 'update' in request.POST:
+            waiver_id = request.POST.get('waiver_id')
+            waiver_type = request.POST.get('waiver_type')
+            amount = request.POST.get('amount')
+            percentage = request.POST.get('percentage')
+            reason = request.POST.get('reason')
+            is_active = 'is_active' in request.POST
+            
+            if waiver_id and waiver_type and amount and reason:
+                try:
+                    waiver = FeeWaiver.objects.get(id=waiver_id)
+                    waiver.waiver_type = waiver_type
+                    waiver.amount = amount
+                    waiver.percentage = percentage
+                    waiver.reason = reason
+                    waiver.is_active = is_active
+                    waiver.save()
+                except FeeWaiver.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_waivers_list')
+        
+        elif 'delete' in request.POST:
+            waiver_id = request.POST.get('waiver_id')
+            if waiver_id:
+                try:
+                    FeeWaiver.objects.get(id=waiver_id).delete()
+                except FeeWaiver.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_waivers_list')
+    
+    # Get available student fees for creating new waivers
+    available_student_fees = StudentFee.objects.filter(status='PENDING').select_related('student')
+    
+    context = {
+        'waivers': waivers,
+        'available_student_fees': available_student_fees,
+        'waiver_type_choices': FeeWaiver.WAIVER_TYPE_CHOICES,
+    }
+    
+    return render(request, 'dashboard/fees/waivers_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_discounts_list(request):
+    """List all fee discounts"""
+    discounts = FeeDiscount.objects.all().select_related(
+        'student_fee__student'
+    ).order_by('-created_at')
+    
+    if request.method == 'POST':
+        if 'create' in request.POST:
+            student_fee_id = request.POST.get('student_fee_id')
+            discount_type = request.POST.get('discount_type')
+            amount = request.POST.get('amount')
+            percentage = request.POST.get('percentage')
+            reason = request.POST.get('reason')
+            valid_until = request.POST.get('valid_until') or None
+            is_active = 'is_active' in request.POST
+            
+            if student_fee_id and discount_type and amount and reason:
+                try:
+                    student_fee = StudentFee.objects.get(id=student_fee_id)
+                    FeeDiscount.objects.create(
+                        student_fee=student_fee,
+                        discount_type=discount_type,
+                        amount=amount,
+                        percentage=percentage,
+                        reason=reason,
+                        valid_until=valid_until,
+                        is_active=is_active
+                    )
+                except StudentFee.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_discounts_list')
+        
+        elif 'update' in request.POST:
+            discount_id = request.POST.get('discount_id')
+            discount_type = request.POST.get('discount_type')
+            amount = request.POST.get('amount')
+            percentage = request.POST.get('percentage')
+            reason = request.POST.get('reason')
+            valid_until = request.POST.get('valid_until') or None
+            is_active = 'is_active' in request.POST
+            
+            if discount_id and discount_type and amount and reason:
+                try:
+                    discount = FeeDiscount.objects.get(id=discount_id)
+                    discount.discount_type = discount_type
+                    discount.amount = amount
+                    discount.percentage = percentage
+                    discount.reason = reason
+                    discount.valid_until = valid_until
+                    discount.is_active = is_active
+                    discount.save()
+                except FeeDiscount.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_discounts_list')
+        
+        elif 'delete' in request.POST:
+            discount_id = request.POST.get('discount_id')
+            if discount_id:
+                try:
+                    FeeDiscount.objects.get(id=discount_id).delete()
+                except FeeDiscount.DoesNotExist:
+                    pass
+                return redirect('dashboard:fees_discounts_list')
+    
+    # Get available student fees for creating new discounts
+    available_student_fees = StudentFee.objects.filter(status='PENDING').select_related('student')
+    
+    context = {
+        'discounts': discounts,
+        'available_student_fees': available_student_fees,
+        'discount_type_choices': FeeDiscount.DISCOUNT_TYPE_CHOICES,
+    }
+    
+    return render(request, 'dashboard/fees/discounts_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_receipts_list(request):
+    """List all fee receipts"""
+    receipts = FeeReceipt.objects.all().select_related(
+        'student_fee__student', 'payment', 'generated_by'
+    ).order_by('-generated_date')
+    
+    # Filtering
+    printed_filter = request.GET.get('printed')
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
+    search_query = request.GET.get('search')
+    
+    if printed_filter is not None:
+        receipts = receipts.filter(is_printed=printed_filter == 'true')
+    
+    if date_from:
+        receipts = receipts.filter(generated_date__date__gte=date_from)
+    
+    if date_to:
+        receipts = receipts.filter(generated_date__date__lte=date_to)
+    
+    if search_query:
+        receipts = receipts.filter(
+            Q(receipt_number__icontains=search_query) |
+            Q(student_fee__student__roll_number__icontains=search_query) |
+            Q(student_fee__student__first_name__icontains=search_query)
+        )
+    
+    context = {
+        'receipts': receipts,
+        'current_filters': {
+            'printed': printed_filter,
+            'date_from': date_from,
+            'date_to': date_to,
+            'search': search_query,
+        }
+    }
+    
+    return render(request, 'dashboard/fees/receipts_list.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_receipt_detail(request, receipt_id):
+    """Show detailed information about a receipt"""
+    receipt = get_object_or_404(FeeReceipt, pk=receipt_id)
+    
+    context = {
+        'receipt': receipt,
+    }
+    
+    return render(request, 'dashboard/fees/receipt_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_reports(request):
+    """Fee management reports and analytics"""
+    
+    # Date range filtering
+    date_from = request.GET.get('date_from', (timezone.now() - timezone.timedelta(days=30)).strftime('%Y-%m-%d'))
+    date_to = request.GET.get('date_to', timezone.now().strftime('%Y-%m-%d'))
+    
+    # Convert to date objects
+    try:
+        from_date = timezone.datetime.strptime(date_from, '%Y-%m-%d').date()
+        to_date = timezone.datetime.strptime(date_to, '%Y-%m-%d').date()
+    except ValueError:
+        from_date = (timezone.now() - timezone.timedelta(days=30)).date()
+        to_date = timezone.now().date()
+    
+    # Payment reports
+    payments_in_range = Payment.objects.filter(
+        payment_date__date__range=[from_date, to_date],
+        status='COMPLETED'
+    )
+    
+    total_payments_amount = payments_in_range.aggregate(total=models.Sum('amount'))['total'] or 0
+    total_payments_count = payments_in_range.count()
+    
+    # Payment method breakdown
+    payment_method_breakdown = payments_in_range.values('payment_method').annotate(
+        count=Count('id'),
+        total_amount=models.Sum('amount')
+    ).order_by('-total_amount')
+    
+    # Daily payment trends
+    daily_payments = payments_in_range.values('payment_date__date').annotate(
+        count=Count('id'),
+        total_amount=models.Sum('amount')
+    ).order_by('payment_date__date')
+    
+    # Fee category performance
+    fee_category_performance = StudentFee.objects.filter(
+        created_at__date__range=[from_date, to_date]
+    ).values('fee_structure_detail__fee_category__name').annotate(
+        total_due=models.Sum('amount_due'),
+        total_paid=models.Sum('amount_paid'),
+        count=Count('id')
+    ).order_by('-total_due')
+    
+    # Academic year performance
+    academic_year_performance = StudentFee.objects.filter(
+        created_at__date__range=[from_date, to_date]
+    ).values('academic_year').annotate(
+        total_due=models.Sum('amount_due'),
+        total_paid=models.Sum('amount_paid'),
+        count=Count('id')
+    ).order_by('-academic_year')
+    
+    # Overdue fees report
+    overdue_fees = StudentFee.objects.filter(
+        due_date__lt=timezone.now().date(),
+        status='PENDING'
+    ).select_related('student', 'fee_structure_detail__fee_category')
+    
+    overdue_amount = overdue_fees.aggregate(total=models.Sum('amount_due'))['total'] or 0
+    
+    # Waiver and discount reports
+    waivers_in_range = FeeWaiver.objects.filter(
+        created_at__date__range=[from_date, to_date],
+        is_active=True
+    )
+    
+    discounts_in_range = FeeDiscount.objects.filter(
+        created_at__date__range=[from_date, to_date],
+        is_active=True
+    )
+    
+    total_waiver_amount = waivers_in_range.aggregate(total=models.Sum('amount'))['total'] or 0
+    total_discount_amount = discounts_in_range.aggregate(total=models.Sum('amount'))['total'] or 0
+    
+    context = {
+        'date_from': date_from,
+        'date_to': date_to,
+        'total_payments_amount': total_payments_amount,
+        'total_payments_count': total_payments_count,
+        'payment_method_breakdown': payment_method_breakdown,
+        'daily_payments': daily_payments,
+        'fee_category_performance': fee_category_performance,
+        'academic_year_performance': academic_year_performance,
+        'overdue_fees': overdue_fees,
+        'overdue_amount': overdue_amount,
+        'total_waiver_amount': total_waiver_amount,
+        'total_discount_amount': total_discount_amount,
+    }
+    
+    return render(request, 'dashboard/fees/reports.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def fees_api_endpoints(request):
+    """Show available fee management API endpoints"""
+    
+    context = {
+        'app_name': 'Fee Management',
+        'base_url': '/api/v1/fees/api/',
+        'endpoints': [
+            {
+                'name': 'Fee Categories',
+                'url': 'categories/',
+                'methods': ['GET', 'POST'],
+                'description': 'Manage fee categories (Tuition, Library, Sports, etc.)'
+            },
+            {
+                'name': 'Fee Structures',
+                'url': 'structures/',
+                'methods': ['GET', 'POST'],
+                'description': 'Manage fee structures for different academic years and grades'
+            },
+            {
+                'name': 'Fee Structure Details',
+                'url': 'structure-details/',
+                'methods': ['GET', 'POST'],
+                'description': 'Manage individual fee items within structures'
+            },
+            {
+                'name': 'Student Fees',
+                'url': 'student-fees/',
+                'methods': ['GET', 'POST'],
+                'description': 'Manage individual student fee records'
+            },
+            {
+                'name': 'Payments',
+                'url': 'payments/',
+                'methods': ['GET', 'POST'],
+                'description': 'Manage fee payments and transactions'
+            },
+            {
+                'name': 'Fee Waivers',
+                'url': 'waivers/',
+                'methods': ['GET', 'POST'],
+                'description': 'Manage fee waivers and scholarships'
+            },
+            {
+                'name': 'Fee Discounts',
+                'url': 'discounts/',
+                'methods': ['GET', 'POST'],
+                'description': 'Manage fee discounts and reductions'
+            },
+            {
+                'name': 'Fee Receipts',
+                'url': 'receipts/',
+                'methods': ['GET', 'POST'],
+                'description': 'Manage fee receipts and documentation'
+            },
+        ]
+    }
+    
+    return render(request, 'dashboard/fees/api_endpoints.html', context)
+
+# ------------------------------
+# Open Requests (UI)
+# ------------------------------
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib import messages
+from open_requests.models import OpenRequest, RequestTarget
+
+
+@login_required
+def open_requests_list(request):
+    target = request.GET.get('target')
+    status_filter = request.GET.get('status')
+    priority = request.GET.get('priority')
+    queryset = OpenRequest.objects.select_related('created_by', 'assignee').all()
+
+    if target in dict(RequestTarget.choices):
+        queryset = queryset.filter(target=target)
+    if status_filter in {'open', 'in_progress', 'resolved', 'closed'}:
+        queryset = queryset.filter(status=status_filter)
+    if priority in {'low', 'medium', 'high', 'urgent'}:
+        queryset = queryset.filter(priority=priority)
+
+    context = {
+        'requests_list': queryset[:200],
+        'target': target,
+        'status_filter': status_filter,
+        'priority': priority,
+        'targets': RequestTarget.choices,
+    }
+    return render(request, 'dashboard/open_requests/list.html', context)
+
+
+@login_required
+def open_request_create(request):
+    if request.method == 'POST':
+        title = request.POST.get('title', '').strip()
+        description = request.POST.get('description', '').strip()
+        target = request.POST.get('target')
+
+        if not title:
+            messages.error(request, 'Title is required.')
+        elif target not in dict(RequestTarget.choices):
+            messages.error(request, 'Please choose a valid target.')
+        else:
+            OpenRequest.objects.create(
+                title=title,
+                description=description,
+                target=target,
+                created_by=request.user,
+            )
+            messages.success(request, 'Request created successfully.')
+            return redirect('dashboard:open_requests_list')
+
+    context = {
+        'targets': RequestTarget.choices,
+    }
+    return render(request, 'dashboard/open_requests/create.html', context)
+
+
+@login_required
+def open_request_detail(request, request_id: int):
+    item = get_object_or_404(OpenRequest, id=request_id)
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'toggle_resolved':
+            item.is_resolved = not item.is_resolved
+            item.save(update_fields=['is_resolved', 'updated_at'])
+            messages.success(request, 'Status updated.')
+            return redirect('dashboard:open_request_detail', request_id=item.id)
+        elif action == 'update':
+            title = request.POST.get('title', '').strip()
+            description = request.POST.get('description', '').strip()
+            target = request.POST.get('target')
+            status_val = request.POST.get('status')
+            priority_val = request.POST.get('priority')
+            due_date_val = request.POST.get('due_date')
+            assignee_input = request.POST.get('assignee', '').strip()
+            if not title:
+                messages.error(request, 'Title is required.')
+            elif target not in dict(RequestTarget.choices):
+                messages.error(request, 'Please choose a valid target.')
+            else:
+                item.title = title
+                item.description = description
+                item.target = target
+                if status_val in {'open', 'in_progress', 'resolved', 'closed'}:
+                    item.status = status_val
+                if priority_val in {'low', 'medium', 'high', 'urgent'}:
+                    item.priority = priority_val
+                if due_date_val:
+                    item.due_date = due_date_val
+                # Resolve assignee by username or email
+                if assignee_input:
+                    from django.contrib.auth import get_user_model
+                    User = get_user_model()
+                    item.assignee = User.objects.filter(username=assignee_input).first() or \
+                                     User.objects.filter(email=assignee_input).first()
+                else:
+                    item.assignee = None
+                item.save()
+                messages.success(request, 'Request updated.')
+                return redirect('dashboard:open_request_detail', request_id=item.id)
+        elif action == 'add_comment':
+            content = request.POST.get('comment', '').strip()
+            if content:
+                from open_requests.models import RequestComment
+                RequestComment.objects.create(request=item, author=request.user, content=content)
+                messages.success(request, 'Comment added.')
+            return redirect('dashboard:open_request_detail', request_id=item.id)
+
+    context = {
+        'item': item,
+        'targets': RequestTarget.choices,
+    }
+    return render(request, 'dashboard/open_requests/detail.html', context)

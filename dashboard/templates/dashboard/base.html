@@ -9,7 +9,29 @@
     <style>
         .sidebar {
             min-height: 100vh;
+            max-height: 100vh;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow-y: auto;
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            z-index: 1000;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.3) transparent;
+        }
+        .sidebar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .sidebar::-webkit-scrollbar-thumb {
+            background-color: rgba(255,255,255,0.3);
+            border-radius: 3px;
+        }
+        .sidebar::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(255,255,255,0.5);
         }
         .sidebar .nav-link {
             color: rgba(255,255,255,0.8);
@@ -20,9 +42,28 @@
             background-color: rgba(255,255,255,0.1);
             color: white;
         }
+        .sidebar .exam-management-nav {
+            background-color: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            font-weight: 600;
+        }
+        .sidebar .exam-management-nav:hover {
+            background-color: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.2);
+        }
         .main-content {
             background-color: #f8f9fa;
             min-height: 100vh;
+            margin-left: 16.666667%; /* Offset for fixed sidebar */
+        }
+        @media (max-width: 768px) {
+            .main-content {
+                margin-left: 0;
+            }
+            .sidebar {
+                position: relative;
+                max-height: none;
+            }
         }
         .card {
             border: none;
@@ -48,7 +89,7 @@
         <div class="row">
             <!-- Sidebar -->
             <nav class="col-md-3 col-lg-2 d-md-block sidebar collapse">
-                <div class="position-sticky pt-3">
+                <div class="position-sticky pt-3" style="height: 100vh; overflow-y: auto;">
                     <div class="text-center mb-4">
                         <h4 class="text-white">
                             <i class="fas fa-tachometer-alt"></i>
@@ -78,6 +119,88 @@
                             <a class="nav-link {% if request.resolver_match.url_name == 'faculty' %}active{% endif %}" 
                                href="{% url 'dashboard:faculty' %}">
                                 <i class="fas fa-chalkboard-teacher"></i> Faculty
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'mentoring' in request.resolver_match.url_name %}active{% endif %}"
+                               href="{% url 'dashboard:mentoring_dashboard' %}">
+                                <i class="fas fa-user-friends"></i> Mentoring
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'academics' in request.resolver_match.url_name %}active{% endif %}" 
+                               href="{% url 'dashboard:academics_dashboard' %}">
+                                <i class="fas fa-book-open"></i> Academics
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'enrollment' in request.resolver_match.url_name %}active{% endif %}" 
+                               href="{% url 'dashboard:enrollment_dashboard' %}">
+                                <i class="fas fa-user-graduate"></i> Enrollment
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'placements' in request.resolver_match.url_name %}active{% endif %}"
+                               href="{% url 'dashboard:placements_dashboard' %}">
+                                <i class="fas fa-briefcase"></i> Placements
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'rnd' in request.resolver_match.url_name %}active{% endif %}"
+                               href="{% url 'dashboard:rnd_dashboard' %}">
+                                <i class="fas fa-flask"></i> R&D
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'facilities' in request.resolver_match.url_name %}active{% endif %}"
+                               href="{% url 'dashboard:facilities_dashboard' %}">
+                                <i class="fas fa-building"></i> Facilities
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'transport' in request.resolver_match.url_name %}active{% endif %}"
+                               href="{% url 'dashboard:transport_dashboard' %}">
+                                <i class="fas fa-bus"></i> Transportation
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'grads' in request.resolver_match.url_name %}active{% endif %}"
+                               href="{% url 'dashboard:grads_dashboard' %}">
+                                <i class="fas fa-certificate"></i> Grads & Marks
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'exams' in request.resolver_match.url_name %}active{% endif %} exam-management-nav" 
+                               href="{% url 'dashboard:exams_dashboard' %}">
+                                <i class="fas fa-file-alt"></i> Exam Management
+                                <span class="badge bg-success ms-2" style="font-size: 0.6rem;">NEW</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'fees' in request.resolver_match.url_name %}active{% endif %}" 
+                               href="{% url 'dashboard:fees_dashboard' %}">
+                                <i class="fas fa-money-bill-wave"></i> Fee Management
+                                <span class="badge bg-primary ms-2" style="font-size: 0.6rem;">NEW</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'feedback' in request.resolver_match.url_name %}active{% endif %}" 
+                               href="{% url 'dashboard:feedback_dashboard' %}">
+                                <i class="fas fa-comments"></i> Feedback
+                                <span class="badge bg-primary ms-2" style="font-size: 0.6rem;">NEW</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'open_requests' in request.resolver_match.url_name %}active{% endif %}"
+                               href="{% url 'dashboard:open_requests_list' %}">
+                                <i class="fas fa-inbox"></i> Open Requests
+                                <span class="badge bg-info ms-2" style="font-size: 0.6rem;">NEW</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'attendance' in request.resolver_match.url_name %}active{% endif %}" 
+                               href="{% url 'dashboard:attendance_sessions' %}">
+                                <i class="fas fa-check-circle"></i> Attendance
                             </a>
                         </li>
                         <li class="nav-item">

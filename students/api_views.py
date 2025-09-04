@@ -23,7 +23,9 @@ class StudentViewSet(viewsets.ModelViewSet):
     """
     API endpoint for managing students
     """
-    queryset = Student.objects.all().order_by('-created_at')
+    queryset = Student.objects.all().select_related('user', 'created_by', 'updated_by').only(
+        'id','roll_number','first_name','last_name','middle_name','grade_level','section','status','created_at','user_id'
+    ).order_by('-created_at')
     serializer_class = StudentSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -91,7 +93,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         if not query:
             return Response({'error': 'Query parameter "q" is required'}, status=400)
         
-        students = Student.objects.filter(
+        students = Student.objects.only('id','roll_number','first_name','last_name','email').filter(
             Q(roll_number__icontains=query) |
             Q(first_name__icontains=query) |
             Q(last_name__icontains=query) |
@@ -130,7 +132,9 @@ class StudentViewSet(viewsets.ModelViewSet):
     def documents(self, request, pk=None):
         """Get student documents"""
         student = self.get_object()
-        documents = StudentDocument.objects.filter(student=student)
+        documents = StudentDocument.objects.select_related('uploaded_by').only(
+            'id','title','document_type','uploaded_by_id','created_at','student_id','document_file'
+        ).filter(student=student)
         serializer = StudentDocumentSerializer(documents, many=True)
         return Response(serializer.data)
 
@@ -138,7 +142,7 @@ class StudentViewSet(viewsets.ModelViewSet):
     def enrollment_history(self, request, pk=None):
         """Get student enrollment history"""
         student = self.get_object()
-        history = StudentEnrollmentHistory.objects.filter(student=student)
+        history = StudentEnrollmentHistory.objects.only('id','grade_level','academic_year','enrollment_date','status','student_id').filter(student=student)
         serializer = StudentEnrollmentHistorySerializer(history, many=True)
         return Response(serializer.data)
 
@@ -146,7 +150,7 @@ class StudentViewSet(viewsets.ModelViewSet):
     def custom_fields(self, request, pk=None):
         """Get student custom field values"""
         student = self.get_object()
-        custom_values = StudentCustomFieldValue.objects.filter(student=student)
+        custom_values = StudentCustomFieldValue.objects.select_related('custom_field').only('id','custom_field_id','value','student_id').filter(student=student)
         serializer = StudentCustomFieldValueSerializer(custom_values, many=True)
         return Response(serializer.data)
 
@@ -369,7 +373,7 @@ class StudentCustomFieldValueViewSet(viewsets.ModelViewSet):
         if not student_id:
             return Response({'error': 'student_id parameter is required'}, status=400)
         
-        values = StudentCustomFieldValue.objects.filter(student_id=student_id)
+        values = StudentCustomFieldValue.objects.select_related('custom_field').only('id','custom_field_id','value','student_id').filter(student_id=student_id)
         serializer = self.get_serializer(values, many=True)
         return Response(serializer.data)
 
@@ -380,7 +384,7 @@ class StudentCustomFieldValueViewSet(viewsets.ModelViewSet):
         if not field_id:
             return Response({'error': 'field_id parameter is required'}, status=400)
         
-        values = StudentCustomFieldValue.objects.filter(custom_field_id=field_id)
+        values = StudentCustomFieldValue.objects.select_related('student').only('id','student_id','value','custom_field_id').filter(custom_field_id=field_id)
         serializer = self.get_serializer(values, many=True)
         return Response(serializer.data)
 

@@ -161,7 +161,8 @@ class Faculty(TimeStampedUUIDModel):
     
     # Employment Information (Extended)
     designation = models.CharField(max_length=25, choices=DESIGNATION_CHOICES, default="LECTURER")
-    department = models.CharField(max_length=25, choices=DEPARTMENT_CHOICES, default="OTHER")
+    department = models.CharField(max_length=25, choices=DEPARTMENT_CHOICES, default="OTHER")  # Keep for backward compatibility
+    department_ref = models.ForeignKey('academics.Department', on_delete=models.SET_NULL, null=True, blank=True, related_name='faculty', help_text="Department reference")
     employment_type = models.CharField(max_length=15, choices=EMPLOYMENT_TYPE_CHOICES, default="FULL_TIME")
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='ACTIVE')
     date_of_joining = models.DateField(default=timezone.now)
