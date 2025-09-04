@@ -1,15 +1,23 @@
 """
 Local development settings for CampsHub360
-Uses SQLite for easy local development without requiring PostgreSQL
+Uses PostgreSQL for local development (same as production)
 """
 import os
 from .settings import *
 
-# Override database settings for local development
+# Override database settings for local development with PostgreSQL
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'campushub360',
+        'USER': 'postgres',
+        'PASSWORD': '123456',
+        'HOST': 'localhost',
+        'PORT': '5432',
+        'CONN_MAX_AGE': 600,
+        'OPTIONS': {
+            'connect_timeout': 10,
+        },
     }
 }
 
