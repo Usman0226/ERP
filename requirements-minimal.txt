@@ -1,0 +1,54 @@
+# Minimal Production Requirements for CampsHub360 Backend
+# This version removes optional packages that might cause conflicts
+
+# Core Django Framework
+Django==5.1.4
+djangorestframework==3.16.1
+djangorestframework-simplejwt==5.5.1
+
+# Database (binary wheels preferred)
+psycopg[binary]==3.2.3
+
+# Server & WSGI
+gunicorn==23.0.0
+gevent==24.11.1
+
+# Utilities
+python-dotenv==1.0.1
+requests==2.32.3
+Pillow==11.0.0
+pandas==2.2.3
+openpyxl==3.1.5
+django-filter==24.3
+
+# Security
+cryptography==44.0.0
+bcrypt==4.2.1
+
+# Performance & Monitoring
+psutil==6.1.0
+
+# CORS
+django-cors-headers==4.6.0
+
+# Caching
+django-redis==5.4.0
+redis==5.2.1
+
+# Environment & Configuration
+python-decouple==3.8
+django-environ==0.11.2
+
+# AWS Services
+boto3==1.35.93
+django-storages==1.14.4
+
+# File Processing
+python-magic==0.4.27
+
+# API Documentation
+drf-spectacular==0.28.0
+
+# Additional Production Dependencies
+whitenoise==6.8.2
+dj-database-url==2.3.0

@@ -111,7 +111,12 @@ source $VENV_DIR/bin/activate
 
 # Install Python dependencies
 pip install --upgrade pip
-pip install -r $APP_DIR/requirements.txt
+
+# Try to install requirements, fallback to minimal if there are conflicts
+if ! pip install -r $APP_DIR/requirements.txt; then
+    print_warning "Full requirements installation failed, trying minimal requirements..."
+    pip install -r $APP_DIR/requirements-minimal.txt
+fi
 
 # Set up environment variables
 export DJANGO_SETTINGS_MODULE=campshub360.production
