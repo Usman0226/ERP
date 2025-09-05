@@ -67,6 +67,16 @@ REDIS_URL=redis://campshub-j2z0gd.serverless.aps1.cache.amazonaws.com:6379/1
 GUNICORN_WORKERS=4
 GUNICORN_WORKER_CLASS=gevent
 GUNICORN_WORKER_CONNECTIONS=1000
+GUNICORN_TIMEOUT=30
+GUNICORN_KEEPALIVE=5
+GUNICORN_MAX_REQUESTS=1000
+GUNICORN_MAX_REQUESTS_JITTER=100
+
+# Security Settings (HTTP deployment)
+SECURE_SSL_REDIRECT=False
+SECURE_HSTS_SECONDS=0
+SECURE_HSTS_INCLUDE_SUBDOMAINS=False
+SECURE_HSTS_PRELOAD=False
 EOF
     
     print_warning "Created .env file. Please review and update the values if needed."
@@ -113,9 +123,19 @@ source $VENV_DIR/bin/activate
 pip install --upgrade pip
 
 # Try to install requirements, fallback to minimal if there are conflicts
-if ! pip install -r $APP_DIR/requirements.txt; then
-    print_warning "Full requirements installation failed, trying minimal requirements..."
-    pip install -r $APP_DIR/requirements-minimal.txt
+print_status "Installing Python dependencies..."
+if pip install -r $APP_DIR/requirements.txt; then
+    print_status "✅ Full requirements installed successfully"
+else
+    print_warning "⚠️ Full requirements installation failed, trying minimal requirements..."
+    if pip install -r $APP_DIR/requirements-minimal.txt; then
+        print_status "✅ Minimal requirements installed successfully"
+    else
+        print_error "❌ Both full and minimal requirements failed"
+        print_warning "Trying manual installation of core packages..."
+        pip install Django==5.1.4 djangorestframework==3.16.1 psycopg[binary]==3.2.3 gunicorn==23.0.0
+        print_warning "Core packages installed. You may need to install additional packages manually."
+    fi
 fi
 
 # Set up environment variables
@@ -181,7 +201,7 @@ Group=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=DJANGO_SETTINGS_MODULE=campshub360.production
-ExecStart=$VENV_DIR/bin/gunicorn --workers 4 --worker-class gevent --bind 127.0.0.1:8000 campshub360.wsgi:application
+ExecStart=$VENV_DIR/bin/gunicorn --config $APP_DIR/gunicorn.conf.py --bind 127.0.0.1:8000 campshub360.wsgi:application
 Restart=always
 RestartSec=10
 
@@ -194,12 +214,17 @@ sudo systemctl enable campshub360
 
 # Set up nginx
 print_status "Setting up nginx..."
-sudo cp $APP_DIR/nginx.conf /etc/nginx/sites-available/$APP_NAME
+sudo cp $APP_DIR/nginx-http.conf /etc/nginx/sites-available/$APP_NAME
 sudo ln -sf /etc/nginx/sites-available/$APP_NAME /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 
 # Test nginx configuration
 sudo nginx -t
+
+# Create log directory
+print_status "Creating log directory..."
+sudo mkdir -p /var/log/django
+sudo chown $SERVICE_USER:$SERVICE_USER /var/log/django
 
 # Set proper permissions
 print_status "Setting permissions..."

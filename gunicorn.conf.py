@@ -3,22 +3,21 @@ import multiprocessing
 import os
 
 # Server socket
-bind = os.getenv('GUNICORN_BIND', "0.0.0.0:10000")
-backlog = int(os.getenv('GUNICORN_BACKLOG', '4096'))
+bind = os.getenv('GUNICORN_BIND', "127.0.0.1:8000")
+backlog = int(os.getenv('GUNICORN_BACKLOG', '2048'))
 
-# Worker processes - Optimized for high concurrency
-workers = int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 4 + 1))
-worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'gevent')  # Async workers for high concurrency
-worker_connections = int(os.getenv('GUNICORN_WORKER_CONNECTIONS', '2000'))
+# Worker processes - Optimized for production
+workers = int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 2 + 1))
+worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'gevent')
+worker_connections = int(os.getenv('GUNICORN_WORKER_CONNECTIONS', '1000'))
 timeout = int(os.getenv('GUNICORN_TIMEOUT', '30'))
 keepalive = int(os.getenv('GUNICORN_KEEPALIVE', '5'))
 
 # Restart workers after this many requests, to help prevent memory leaks
-max_requests = int(os.getenv('GUNICORN_MAX_REQUESTS', '10000'))
-max_requests_jitter = int(os.getenv('GUNICORN_MAX_REQUESTS_JITTER', '1000'))
+max_requests = int(os.getenv('GUNICORN_MAX_REQUESTS', '1000'))
+max_requests_jitter = int(os.getenv('GUNICORN_MAX_REQUESTS_JITTER', '100'))
 
 # Memory management
-max_requests_jitter = 1000
 preload_app = True  # Load application code before forking workers
 
 # Logging - Enhanced for monitoring
@@ -43,7 +42,6 @@ certfile = None
 
 # Performance tuning
 worker_tmp_dir = "/dev/shm"  # Use RAM for temporary files
-worker_class = "gevent"  # Use gevent for async I/O
 
 # Graceful shutdown
 graceful_timeout = 30

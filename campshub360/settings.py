@@ -47,6 +47,11 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
     'django_filters',
+    'corsheaders',
+    'health_check',
+    'health_check.db',
+    'health_check.cache',
+    'health_check.storage',
     'accounts',
     'dashboard',
     'students',
@@ -69,6 +74,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -285,3 +291,10 @@ DATABASES['default']['OPTIONS'].update({
 # Connection Pooling
 DATABASES['default']['CONN_MAX_AGE'] = 600  # 10 minutes
 DATABASES['read_replica']['CONN_MAX_AGE'] = 600
+
+# CORS settings
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
+CORS_ALLOW_CREDENTIALS = True
+
+# CSRF settings
+CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')

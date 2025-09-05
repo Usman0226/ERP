@@ -1,5 +1,6 @@
 # Minimal Production Requirements for CampsHub360 Backend
 # This version removes optional packages that might cause conflicts
+# Updated with latest stable versions (December 2024)
 
 # Core Django Framework
 Django==5.1.4
@@ -52,3 +53,9 @@ drf-spectacular==0.28.0
 # Additional Production Dependencies
 whitenoise==6.8.2
 dj-database-url==2.3.0
+
+# Health Check and Monitoring
+django-health-check==3.18.1
+
+# Additional Security
+django-ratelimit==4.1.0

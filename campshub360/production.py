@@ -44,24 +44,24 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-# Security settings for production
-SECURE_SSL_REDIRECT = True
-SECURE_HSTS_SECONDS = 31536000  # 1 year
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
+# Security settings for production (configurable via environment)
+SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'False').lower() == 'true'
+SECURE_HSTS_PRELOAD = os.getenv('SECURE_HSTS_PRELOAD', 'False').lower() == 'true'
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 
-# CSRF Protection
-CSRF_COOKIE_SECURE = True
+# CSRF Protection (configurable for HTTP/HTTPS)
+CSRF_COOKIE_SECURE = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
 CSRF_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SAMESITE = 'Strict'
+CSRF_COOKIE_SAMESITE = 'Lax'  # More flexible for initial deployment
 
-# Session Security
-SESSION_COOKIE_SECURE = True
+# Session Security (configurable for HTTP/HTTPS)
+SESSION_COOKIE_SECURE = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = 'Strict'
+SESSION_COOKIE_SAMESITE = 'Lax'  # More flexible for initial deployment
 SESSION_COOKIE_AGE = 3600  # 1 hour
 
 # Caching - Use Redis for production (AWS ElastiCache recommended)
@@ -194,7 +194,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# Remove development apps
+# Production apps
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -206,6 +206,10 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'django_filters',
     'corsheaders',
+    'health_check',
+    'health_check.db',
+    'health_check.cache',
+    'health_check.storage',
     'accounts',
     'dashboard',
     'students',
