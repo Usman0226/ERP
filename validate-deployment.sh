@@ -96,6 +96,14 @@ else
     print_warning "Check ElastiCache security groups and connection details"
 fi
 
+# Test cache settings
+print_header "Cache Settings Test"
+if python manage.py shell -c "from django.core.cache import cache; cache.set('cache_test', 'working', 300); print('Cache OK' if cache.get('cache_test') == 'working' else 'Cache FAIL')" 2>/dev/null | grep -q "Cache OK"; then
+    print_status "✓ Cache settings are working"
+else
+    print_warning "⚠ Cache settings test failed"
+fi
+
 # Test static files
 print_header "Static Files Test"
 if [ -d "/app/staticfiles" ] && [ "$(ls -A /app/staticfiles)" ]; then
@@ -111,6 +119,22 @@ if curl -f http://$PUBLIC_IP/admin/ > /dev/null 2>&1; then
     print_status "✓ Admin panel is accessible"
 else
     print_warning "⚠ Admin panel test failed"
+fi
+
+# Test API endpoints
+print_header "API Endpoints Test"
+if curl -f http://$PUBLIC_IP/api/ > /dev/null 2>&1; then
+    print_status "✓ API endpoints are accessible"
+else
+    print_warning "⚠ API endpoints test failed"
+fi
+
+# Test CORS settings
+print_header "CORS Settings Test"
+if curl -H "Origin: http://$PUBLIC_IP" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: X-Requested-With" -X OPTIONS http://$PUBLIC_IP/api/ > /dev/null 2>&1; then
+    print_status "✓ CORS settings are working"
+else
+    print_warning "⚠ CORS settings test failed"
 fi
 
 # Final summary

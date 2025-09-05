@@ -77,6 +77,17 @@ SECURE_SSL_REDIRECT=False
 SECURE_HSTS_SECONDS=0
 SECURE_HSTS_INCLUDE_SUBDOMAINS=False
 SECURE_HSTS_PRELOAD=False
+
+# CORS Settings (for frontend integration)
+CORS_ALLOWED_ORIGINS=http://$PUBLIC_IP,http://localhost
+CSRF_TRUSTED_ORIGINS=http://$PUBLIC_IP,http://localhost
+
+# Cache Settings
+CACHE_DEFAULT_TIMEOUT=300
+SESSION_CACHE_TIMEOUT=86400
+
+# API Settings
+API_PAGE_SIZE=50
 EOF
     
     print_warning "Created .env file. Please review and update the values if needed."
