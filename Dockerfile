@@ -20,7 +20,7 @@ RUN apt-get update \
         && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements-basic.txt /app/requirements.txt
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
@@ -30,11 +30,7 @@ COPY . /app/
 # Create directories for static and media files
 RUN mkdir -p /app/staticfiles /app/media
 
-# Make build script executable
-RUN chmod +x build.sh
-
-# Run build script
-RUN ./build.sh
+# Removed non-existent build script steps
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser \
