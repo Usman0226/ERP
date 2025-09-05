@@ -15,6 +15,8 @@ RUN apt-get update \
         postgresql-client \
         build-essential \
         libpq-dev \
+        libssl-dev \
+        libffi-dev \
         curl \
         git \
         && rm -rf /var/lib/apt/lists/*
