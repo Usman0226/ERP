@@ -1,0 +1,28 @@
+# Logrotate configuration for CampsHub360
+# Place this file in /etc/logrotate.d/campshub360
+
+/var/log/django/campshub360.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    create 644 www-data www-data
+    postrotate
+        systemctl reload campshub360
+    endscript
+}
+
+/var/log/nginx/campshub360_*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    create 644 www-data www-data
+    postrotate
+        systemctl reload nginx
+    endscript
+}

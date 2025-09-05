@@ -1,5 +1,7 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth import logout
+from django.contrib import messages
 from django.db import connection, models
 from django.apps import apps
 from django.http import JsonResponse
@@ -681,13 +683,32 @@ def grads_transcript(request, student_id):
 def database_schema(request):
     """Database schema overview"""
     with connection.cursor() as cursor:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        # PostgreSQL-compatible query to get table names
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_type = 'BASE TABLE'
+            ORDER BY table_name;
+        """)
         tables = [row[0] for row in cursor.fetchall()]
     
     schema_info = []
     for table in tables:
         with connection.cursor() as cursor:
-            cursor.execute(f"PRAGMA table_info({table});")
+            # PostgreSQL-compatible query to get column information
+            cursor.execute("""
+                SELECT 
+                    column_name,
+                    data_type,
+                    is_nullable,
+                    column_default,
+                    character_maximum_length
+                FROM information_schema.columns 
+                WHERE table_name = %s 
+                AND table_schema = 'public'
+                ORDER BY ordinal_position;
+            """, [table])
             columns = cursor.fetchall()
             schema_info.append({
                 'table': table,
@@ -703,22 +724,40 @@ def database_schema(request):
 def api_database_schema(request):
     """API endpoint to get database schema information"""
     with connection.cursor() as cursor:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        # PostgreSQL-compatible query to get table names
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_type = 'BASE TABLE'
+            ORDER BY table_name;
+        """)
         tables = [row[0] for row in cursor.fetchall()]
     
     schema_data = {}
     for table in tables:
         with connection.cursor() as cursor:
-            cursor.execute(f"PRAGMA table_info({table});")
+            # PostgreSQL-compatible query to get column information
+            cursor.execute("""
+                SELECT 
+                    column_name,
+                    data_type,
+                    is_nullable,
+                    column_default,
+                    character_maximum_length
+                FROM information_schema.columns 
+                WHERE table_name = %s 
+                AND table_schema = 'public'
+                ORDER BY ordinal_position;
+            """, [table])
             columns = cursor.fetchall()
             schema_data[table] = [
                 {
-                    'id': col[0],
-                    'name': col[1],
-                    'type': col[2],
-                    'not_null': bool(col[3]),
-                    'default': col[4],
-                    'primary_key': bool(col[5])
+                    'name': col[0],
+                    'type': col[1],
+                    'not_null': col[2] == 'NO',
+                    'default': col[3],
+                    'max_length': col[4]
                 }
                 for col in columns
             ]
@@ -742,16 +781,35 @@ def download_schema_excel(request):
     wb.remove(wb.active)
 
     with connection.cursor() as cursor:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        # PostgreSQL-compatible query to get table names
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_type = 'BASE TABLE'
+            ORDER BY table_name;
+        """)
         tables = [row[0] for row in cursor.fetchall()]
 
     for table in tables:
         ws = wb.create_sheet(title=str(table)[:31])  # Excel sheet name limit
-        ws.append(["#", "column", "type", "not_null", "default", "primary_key"])  
+        ws.append(["column", "type", "not_null", "default", "max_length"])  
         with connection.cursor() as cursor:
-            cursor.execute(f"PRAGMA table_info({table});")
+            # PostgreSQL-compatible query to get column information
+            cursor.execute("""
+                SELECT 
+                    column_name,
+                    data_type,
+                    is_nullable,
+                    column_default,
+                    character_maximum_length
+                FROM information_schema.columns 
+                WHERE table_name = %s 
+                AND table_schema = 'public'
+                ORDER BY ordinal_position;
+            """, [table])
             for col in cursor.fetchall():
-                ws.append([col[0], col[1], col[2], bool(col[3]), col[4], bool(col[5])])
+                ws.append([col[0], col[1], col[2] == 'NO', col[3], col[4]])
 
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename="database_schema.xlsx"'
@@ -773,17 +831,36 @@ def download_schema_excel_single(request):
     wb = Workbook()
     ws = wb.active
     ws.title = 'schema'
-    ws.append(["table", "#", "column", "type", "not_null", "default", "primary_key"])  
+    ws.append(["table", "column", "type", "not_null", "default", "max_length"])  
 
     with connection.cursor() as cursor:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        # PostgreSQL-compatible query to get table names
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_type = 'BASE TABLE'
+            ORDER BY table_name;
+        """)
         tables = [row[0] for row in cursor.fetchall()]
 
     for table in tables:
         with connection.cursor() as cursor:
-            cursor.execute(f"PRAGMA table_info({table});")
+            # PostgreSQL-compatible query to get column information
+            cursor.execute("""
+                SELECT 
+                    column_name,
+                    data_type,
+                    is_nullable,
+                    column_default,
+                    character_maximum_length
+                FROM information_schema.columns 
+                WHERE table_name = %s 
+                AND table_schema = 'public'
+                ORDER BY ordinal_position;
+            """, [table])
             for col in cursor.fetchall():
-                ws.append([table, col[0], col[1], col[2], bool(col[3]), col[4], bool(col[5])])
+                ws.append([table, col[0], col[1], col[2] == 'NO', col[3], col[4]])
 
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename="database_schema_single.xlsx"'
@@ -800,17 +877,36 @@ def download_schema_csv(request):
         response['Content-Disposition'] = 'attachment; filename="database_schema.csv"'
 
         writer = csv.writer(response)
-        writer.writerow(["table", "#", "column", "type", "not_null", "default", "primary_key"])  
+        writer.writerow(["table", "column", "type", "not_null", "default", "max_length"])  
 
         with connection.cursor() as cursor:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            # PostgreSQL-compatible query to get table names
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_type = 'BASE TABLE'
+                ORDER BY table_name;
+            """)
             tables = [row[0] for row in cursor.fetchall()]
 
         for table in tables:
             with connection.cursor() as cursor:
-                cursor.execute(f"PRAGMA table_info({table});")
+                # PostgreSQL-compatible query to get column information
+                cursor.execute("""
+                    SELECT 
+                        column_name,
+                        data_type,
+                        is_nullable,
+                        column_default,
+                        character_maximum_length
+                    FROM information_schema.columns 
+                    WHERE table_name = %s 
+                    AND table_schema = 'public'
+                    ORDER BY ordinal_position;
+                """, [table])
                 for col in cursor.fetchall():
-                    writer.writerow([table, col[0], col[1], col[2], bool(col[3]), col[4], bool(col[5])])
+                    writer.writerow([table, col[0], col[1], col[2] == 'NO', col[3], col[4]])
 
         return response
     except Exception as e:
@@ -4631,3 +4727,11 @@ def open_request_detail(request, request_id: int):
         'targets': RequestTarget.choices,
     }
     return render(request, 'dashboard/open_requests/detail.html', context)
+
+
+def custom_logout(request):
+    """Custom logout view that handles both GET and POST requests"""
+    if request.user.is_authenticated:
+        logout(request)
+        messages.success(request, 'You have been successfully logged out.')
+    return redirect('dashboard:login')

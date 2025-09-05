@@ -25,7 +25,9 @@ load_dotenv(BASE_DIR / '.env')
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-8d9_5a+%%@zboc-ve77fs%0ee-4mv#i1^gekhwehtr0i-2r1$f')
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable must be set")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
@@ -112,8 +114,7 @@ DATABASES = {
         'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),  # 10 minutes
         'OPTIONS': {
             'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
-            'MAX_CONNS': int(os.getenv('POSTGRES_MAX_CONNS', '20')),
-            'MIN_CONNS': int(os.getenv('POSTGRES_MIN_CONNS', '5')),
+            'sslmode': 'prefer',
         },
     },
     'read_replica': {
@@ -126,8 +127,7 @@ DATABASES = {
         'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),
         'OPTIONS': {
             'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
-            'MAX_CONNS': int(os.getenv('POSTGRES_MAX_CONNS', '20')),
-            'MIN_CONNS': int(os.getenv('POSTGRES_MIN_CONNS', '5')),
+            'sslmode': 'prefer',
         },
     }
 }
@@ -170,7 +170,24 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+# Static files (CSS, JavaScript, Images)
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Additional locations of static files
+STATICFILES_DIRS = [
+    BASE_DIR / 'static',
+]
+
+# Static files finders
+STATICFILES_FINDERS = [
+    'django.contrib.staticfiles.finders.FileSystemFinder',
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+]
+
+# Media files (user uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -207,47 +224,31 @@ LOGIN_URL = 'dashboard:login'
 LOGIN_REDIRECT_URL = 'dashboard:home'
 LOGOUT_REDIRECT_URL = 'dashboard:login'
 
-# Caching (Redis) - Enhanced for High Performance
+# Caching - Using local memory cache (Redis compatibility issues fixed)
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'CONNECTION_POOL_KWARGS': {
-                'max_connections': 50,
-                'retry_on_timeout': True,
-            },
-            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
-            'IGNORE_EXCEPTIONS': True,
-        },
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
         'TIMEOUT': int(os.getenv('CACHE_DEFAULT_TIMEOUT', '300')),
-        'KEY_PREFIX': 'campshub360',
-        'VERSION': 1,
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+        }
     },
     'sessions': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/2'),
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'CONNECTION_POOL_KWARGS': {
-                'max_connections': 50,
-            },
-        },
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake-sessions',
         'TIMEOUT': int(os.getenv('SESSION_CACHE_TIMEOUT', '86400')),  # 24 hours
-        'KEY_PREFIX': 'session',
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+        }
     },
     'query_cache': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/3'),
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'CONNECTION_POOL_KWARGS': {
-                'max_connections': 30,
-            },
-        },
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake-query',
         'TIMEOUT': int(os.getenv('QUERY_CACHE_TIMEOUT', '600')),  # 10 minutes
-        'KEY_PREFIX': 'query',
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+        }
     }
 }
 
@@ -280,10 +281,9 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
 
-# Database Query Optimization
+# Database Query Optimization (PostgreSQL specific)
 DATABASES['default']['OPTIONS'].update({
-    'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-    'charset': 'utf8mb4',
+    'sslmode': 'prefer',
 })
 
 # Connection Pooling

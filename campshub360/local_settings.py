@@ -1,42 +1,47 @@
 """
 Local development settings for CampsHub360
-Uses PostgreSQL for local development (same as production)
+Uses SQLite for local development (simpler setup)
 """
 import os
 from .settings import *
 
-# Override database settings for local development with PostgreSQL
+# Override database settings for local development with SQLite
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'campushub360',
-        'USER': 'postgres',
-        'PASSWORD': '123456',
-        'HOST': 'localhost',
-        'PORT': '5432',
-        'CONN_MAX_AGE': 600,
-        'OPTIONS': {
-            'connect_timeout': 10,
-        },
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+        'ATOMIC_REQUESTS': True,  # Ensure database transactions
     }
 }
 
 # Disable read replica for local development
 DATABASE_ROUTERS = []
 
-# Use local cache instead of Redis for development
+# Use local cache instead of Redis for development (Fixed)
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'unique-snowflake',
+        'TIMEOUT': 300,
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+        }
     },
     'sessions': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'unique-snowflake-sessions',
+        'TIMEOUT': 86400,  # 24 hours
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+        }
     },
     'query_cache': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'unique-snowflake-query',
+        'TIMEOUT': 600,  # 10 minutes
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+        }
     }
 }
 
@@ -72,6 +77,9 @@ MIDDLEWARE = [
     # Performance monitoring (lightweight for local dev)
     'campshub360.middleware.PerformanceMonitoringMiddleware',
 ]
+
+# Disable autoreload for stable connections
+USE_TZ = True
 
 # CORS settings for local development
 CORS_ALLOW_ALL_ORIGINS = True

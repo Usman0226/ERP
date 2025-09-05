@@ -1,49 +1,92 @@
 """
-Production settings for CampsHub360 project.
+Production settings for CampsHub360 project - AWS EC2 Optimized.
 """
 import os
 from .settings import *
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+DEBUG = False
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-production-key-change-this')
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable must be set in production")
 
-# Allowed hosts
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+# Allowed hosts - configure for your EC2 instance
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
+if not ALLOWED_HOSTS or ALLOWED_HOSTS == ['']:
+    raise ValueError("ALLOWED_HOSTS environment variable must be set in production")
 
-# Database - PostgreSQL for production
+# Database - PostgreSQL for production (AWS RDS recommended)
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', 'campushub360'),
-        'USER': os.getenv('POSTGRES_USER', 'postgres'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'secure_password_123'),
-        'HOST': os.getenv('POSTGRES_HOST', 'db'),
+        'NAME': os.getenv('POSTGRES_DB'),
+        'USER': os.getenv('POSTGRES_USER'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD'),
+        'HOST': os.getenv('POSTGRES_HOST'),
         'PORT': int(os.getenv('POSTGRES_PORT', '5432')),
-        'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),
+        'CONN_MAX_AGE': 600,  # 10 minutes
         'OPTIONS': {
-            'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
+            'connect_timeout': 10,
+            'sslmode': 'require',  # Force SSL for AWS RDS
         },
     }
 }
 
-# Static files
+# Remove read replica for production simplicity
+DATABASES.pop('read_replica', None)
+DATABASE_ROUTERS = []
+
+# Static files - use AWS S3 or serve via nginx
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-# Media files
+# Media files - use AWS S3 for production
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-# Security settings
-SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
-SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))
-SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'False').lower() == 'true'
-SECURE_HSTS_PRELOAD = os.getenv('SECURE_HSTS_PRELOAD', 'False').lower() == 'true'
+# Security settings for production
+SECURE_SSL_REDIRECT = True
+SECURE_HSTS_SECONDS = 31536000  # 1 year
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
 
-# Logging
+# CSRF Protection
+CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = 'Strict'
+
+# Session Security
+SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Strict'
+SESSION_COOKIE_AGE = 3600  # 1 hour
+
+# Caching - Use Redis for production (AWS ElastiCache recommended)
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 50,
+                'retry_on_timeout': True,
+            }
+        },
+        'TIMEOUT': 300,
+    }
+}
+
+# Session engine
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
+
+# Logging configuration for production
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -53,7 +96,7 @@ LOGGING = {
             'style': '{',
         },
         'simple': {
-            'format': '{levelname} {message}',
+            'format': '{levelname} {asctime} {message}',
             'style': '{',
         },
     },
@@ -63,14 +106,16 @@ LOGGING = {
             'formatter': 'simple',
         },
         'file': {
-            'class': 'logging.FileHandler',
-            'filename': '/app/logs/django.log',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': '/var/log/django/campshub360.log',
+            'maxBytes': 1024*1024*15,  # 15MB
+            'backupCount': 10,
             'formatter': 'verbose',
         },
     },
     'root': {
         'handlers': ['console'],
-        'level': 'INFO',
+        'level': 'WARNING',
     },
     'loggers': {
         'django': {
@@ -86,6 +131,84 @@ LOGGING = {
     },
 }
 
-# Create logs directory
-import os
-os.makedirs('/app/logs', exist_ok=True)
+# Performance settings
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
+
+# Email configuration (AWS SES recommended)
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'email-smtp.us-east-1.amazonaws.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@yourdomain.com')
+
+# AWS S3 Configuration (optional - for static/media files)
+if os.getenv('USE_S3', 'False').lower() == 'true':
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'us-east-1')
+    AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+    AWS_DEFAULT_ACL = 'public-read'
+    AWS_S3_OBJECT_PARAMETERS = {
+        'CacheControl': 'max-age=86400',
+    }
+    
+    # Static files
+    STATICFILES_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+    STATIC_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/static/'
+    
+    # Media files
+    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+    MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/media/'
+
+# Remove development middleware
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'campshub360.middleware.SecurityHeadersMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+# Remove development apps
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
+    'django_filters',
+    'corsheaders',
+    'accounts',
+    'dashboard',
+    'students',
+    'faculty',
+    'academics',
+    'enrollment',
+    'attendance',
+    'placements',
+    'grads',
+    'rnd',
+    'facilities',
+    'exams',
+    'fees',
+    'transportation',
+    'mentoring',
+    'feedback',
+    'open_requests',
+    'campshub360',
+]
+
+# CORS settings for production
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
+CORS_ALLOW_CREDENTIALS = True

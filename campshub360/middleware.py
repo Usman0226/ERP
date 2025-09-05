@@ -131,6 +131,11 @@ class HighPerformanceRateLimitMiddleware(MiddlewareMixin):
             'retry_after': 60
         }, status=429, headers={'Retry-After': '60'})
 
+    def _generate_request_id(self, request) -> str:
+        """Generate unique request ID"""
+        data = f"{request.META.get('REMOTE_ADDR', '')}{time()}{request.path}"
+        return hashlib.md5(data.encode()).hexdigest()[:16]
+
     def _add_performance_headers(self, response, request):
         """Add performance monitoring headers"""
         response['X-Request-ID'] = self._generate_request_id(request)
@@ -203,13 +208,15 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
         response['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         response['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
         
-        # Content Security Policy
+        # Content Security Policy - Updated to allow CDN resources
         csp = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+            "https://code.jquery.com https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' "
+            "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
             "img-src 'self' data: https:; "
-            "font-src 'self' data:; "
+            "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
             "connect-src 'self'; "
             "frame-ancestors 'none';"
         )

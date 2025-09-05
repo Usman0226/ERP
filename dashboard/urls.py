@@ -7,7 +7,7 @@ app_name = 'dashboard'
 urlpatterns = [
     # Auth
     path('login/', auth_views.LoginView.as_view(template_name='dashboard/login.html'), name='login'),
-    path('logout/', auth_views.LogoutView.as_view(next_page='dashboard:login'), name='logout'),
+    path('logout/', views.custom_logout, name='logout'),
 
     # Dashboard pages
     path('', views.dashboard_home, name='home'),

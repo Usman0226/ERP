@@ -1,0 +1,32 @@
+# Systemd service file for CampsHub360
+# Place this file in /etc/systemd/system/campshub360.service
+
+[Unit]
+Description=CampsHub360 Django Application
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=exec
+User=www-data
+Group=www-data
+WorkingDirectory=/app
+Environment=PATH=/app/venv/bin
+Environment=DJANGO_SETTINGS_MODULE=campshub360.production
+ExecStart=/app/venv/bin/gunicorn --workers 3 --worker-class gevent --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 30 --keep-alive 2 --bind 127.0.0.1:8000 campshub360.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=campshub360
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/app/logs /app/media
+
+[Install]
+WantedBy=multi-user.target

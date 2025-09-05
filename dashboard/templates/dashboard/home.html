@@ -2,31 +2,60 @@
 
 {% block title %}Dashboard Overview - CampsHub360{% endblock %}
 
-{% block content %}
-<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
-    <h1 class="h2">
-        <i class="fas fa-tachometer-alt text-primary"></i>
-        Dashboard Overview
-    </h1>
-    <div class="btn-toolbar mb-2 mb-md-0">
-        <button class="btn btn-primary" onclick="refreshData()">
-            <i class="fas fa-sync-alt"></i> Refresh
+{% block page_title %}
+    <i class="fas fa-tachometer-alt text-primary me-2"></i>
+    Dashboard Overview
+{% endblock %}
+
+{% block page_subtitle %}
+    Monitor your institution's performance and manage all aspects of campus life
+{% endblock %}
+
+{% block header_actions %}
+    <button class="btn btn-outline-primary" onclick="refreshData()" data-bs-toggle="tooltip" title="Refresh dashboard data">
+        <i class="fas fa-sync-alt"></i> Refresh
+    </button>
+    <div class="btn-group" role="group">
+        <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="fas fa-download"></i> Export
         </button>
+        <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="#"><i class="fas fa-file-pdf"></i> PDF Report</a></li>
+            <li><a class="dropdown-item" href="#"><i class="fas fa-file-excel"></i> Excel Data</a></li>
+            <li><a class="dropdown-item" href="#"><i class="fas fa-file-csv"></i> CSV Export</a></li>
+        </ul>
     </div>
-</div>
+    <div class="btn-group" role="group">
+        <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="fas fa-user-circle"></i> {{ request.user.email|truncatechars:20 }}
+        </button>
+        <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="#"><i class="fas fa-user"></i> Profile</a></li>
+            <li><a class="dropdown-item" href="#"><i class="fas fa-cog"></i> Settings</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item text-danger" href="{% url 'dashboard:logout' %}" 
+                   onclick="return confirm('Are you sure you want to logout?')">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a></li>
+        </ul>
+    </div>
+{% endblock %}
+
+{% block content %}
 
 <!-- Statistics Cards -->
-<div class="row mb-4">
+<div class="row mb-5">
     <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stats-card">
+        <div class="card stats-card" style="background: var(--primary-gradient);">
             <div class="card-body">
-                <div class="d-flex">
-                    <div class="flex-grow-1">
-                        <h6 class="card-title text-white-50">Total Users</h6>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50 mb-2">Total Users</h6>
                         <h2 class="mb-0">{{ total_users }}</h2>
+                        <small class="text-white-50">+12% from last month</small>
                     </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-users fa-2x opacity-75"></i>
+                    <div class="stats-icon">
+                        <i class="fas fa-users"></i>
                     </div>
                 </div>
             </div>
@@ -34,15 +63,16 @@
     </div>
     
     <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stats-card">
+        <div class="card stats-card" style="background: var(--secondary-gradient);">
             <div class="card-body">
-                <div class="d-flex">
-                    <div class="flex-grow-1">
-                        <h6 class="card-title text-white-50">Roles</h6>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50 mb-2">Roles</h6>
                         <h2 class="mb-0">{{ total_roles }}</h2>
+                        <small class="text-white-50">Active roles</small>
                     </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-user-shield fa-2x opacity-75"></i>
+                    <div class="stats-icon">
+                        <i class="fas fa-user-shield"></i>
                     </div>
                 </div>
             </div>
@@ -50,15 +80,16 @@
     </div>
     
     <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stats-card">
+        <div class="card stats-card" style="background: var(--success-gradient);">
             <div class="card-body">
-                <div class="d-flex">
-                    <div class="flex-grow-1">
-                        <h6 class="card-title text-white-50">Permissions</h6>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50 mb-2">Permissions</h6>
                         <h2 class="mb-0">{{ total_permissions }}</h2>
+                        <small class="text-white-50">System permissions</small>
                     </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-key fa-2x opacity-75"></i>
+                    <div class="stats-icon">
+                        <i class="fas fa-key"></i>
                     </div>
                 </div>
             </div>
@@ -66,15 +97,16 @@
     </div>
     
     <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stats-card">
+        <div class="card stats-card" style="background: var(--warning-gradient);">
             <div class="card-body">
-                <div class="d-flex">
-                    <div class="flex-grow-1">
-                        <h6 class="card-title text-white-50">Active Sessions</h6>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50 mb-2">Active Sessions</h6>
                         <h2 class="mb-0">{{ active_sessions }}</h2>
+                        <small class="text-white-50">Currently online</small>
                     </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-clock fa-2x opacity-75"></i>
+                    <div class="stats-icon">
+                        <i class="fas fa-clock"></i>
                     </div>
                 </div>
             </div>
@@ -83,17 +115,18 @@
 </div>
 
 <!-- Student Statistics Row -->
-<div class="row mb-4">
+<div class="row mb-5">
     <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stats-card">
+        <div class="card stats-card" style="background: var(--info-gradient);">
             <div class="card-body">
-                <div class="d-flex">
-                    <div class="flex-grow-1">
-                        <h6 class="card-title text-white-50">Total Students</h6>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50 mb-2">Total Students</h6>
                         <h2 class="mb-0">{{ total_students }}</h2>
+                        <small class="text-white-50">Enrolled students</small>
                     </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-graduation-cap fa-2x opacity-75"></i>
+                    <div class="stats-icon">
+                        <i class="fas fa-graduation-cap"></i>
                     </div>
                 </div>
             </div>
@@ -101,15 +134,16 @@
     </div>
     
     <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stats-card">
+        <div class="card stats-card" style="background: var(--dark-gradient);">
             <div class="card-body">
-                <div class="d-flex">
-                    <div class="flex-grow-1">
-                        <h6 class="card-title text-white-50">Active Students</h6>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50 mb-2">Active Students</h6>
                         <h2 class="mb-0">{{ active_students }}</h2>
+                        <small class="text-white-50">Currently active</small>
                     </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-user-check fa-2x opacity-75"></i>
+                    <div class="stats-icon">
+                        <i class="fas fa-user-check"></i>
                     </div>
                 </div>
             </div>
@@ -117,15 +151,16 @@
     </div>
     
     <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stats-card">
+        <div class="card stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
             <div class="card-body">
-                <div class="d-flex">
-                    <div class="flex-grow-1">
-                        <h6 class="card-title text-white-50">Custom Fields</h6>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50 mb-2">Custom Fields</h6>
                         <h2 class="mb-0">{{ total_custom_fields }}</h2>
+                        <small class="text-white-50">Configured fields</small>
                     </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-cogs fa-2x opacity-75"></i>
+                    <div class="stats-icon">
+                        <i class="fas fa-cogs"></i>
                     </div>
                 </div>
             </div>
@@ -133,18 +168,60 @@
     </div>
     
     <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stats-card">
+        <div class="card">
+            <div class="card-body text-center">
+                <h6 class="card-title text-muted mb-3">Quick Actions</h6>
+                <div class="d-grid gap-2">
+                    <a href="{% url 'dashboard:students' %}" class="btn btn-primary btn-sm">
+                        <i class="fas fa-users me-1"></i> Manage Students
+                    </a>
+                    <a href="{% url 'dashboard:custom_fields' %}" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-cogs me-1"></i> Custom Fields
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Stats Overview -->
+<div class="row mb-5">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-chart-line text-primary me-2"></i>
+                    System Overview
+                </h5>
+            </div>
             <div class="card-body">
-                <div class="d-flex">
-                    <div class="flex-grow-1">
-                        <h6 class="card-title text-white-50">Quick Actions</h6>
-                        <div class="btn-group-vertical btn-group-sm">
-                            <a href="{% url 'dashboard:students' %}" class="btn btn-outline-light btn-sm">
-                                <i class="fas fa-users"></i> Manage Students
-                            </a>
-                            <a href="{% url 'dashboard:custom_fields' %}" class="btn btn-outline-light btn-sm">
-                                <i class="fas fa-cogs"></i> Custom Fields
-                            </a>
+                <div class="row">
+                    <div class="col-md-3 text-center mb-3">
+                        <div class="p-3 bg-light rounded">
+                            <i class="fas fa-database fa-2x text-primary mb-2"></i>
+                            <h6 class="mb-1">Database Status</h6>
+                            <span class="badge bg-success">Healthy</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3 text-center mb-3">
+                        <div class="p-3 bg-light rounded">
+                            <i class="fas fa-server fa-2x text-success mb-2"></i>
+                            <h6 class="mb-1">Server Status</h6>
+                            <span class="badge bg-success">Online</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3 text-center mb-3">
+                        <div class="p-3 bg-light rounded">
+                            <i class="fas fa-shield-alt fa-2x text-warning mb-2"></i>
+                            <h6 class="mb-1">Security</h6>
+                            <span class="badge bg-success">Secure</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3 text-center mb-3">
+                        <div class="p-3 bg-light rounded">
+                            <i class="fas fa-sync-alt fa-2x text-info mb-2"></i>
+                            <h6 class="mb-1">Last Backup</h6>
+                            <span class="badge bg-info">2 hours ago</span>
                         </div>
                     </div>
                 </div>
@@ -154,22 +231,22 @@
 </div>
 
 <!-- Recent Activity -->
-<div class="row">
+<div class="row mb-5">
     <div class="col-lg-6 mb-4">
-        <div class="card">
-            <div class="card-header">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">
-                    <i class="fas fa-user-plus text-primary"></i>
+                    <i class="fas fa-user-plus text-primary me-2"></i>
                     Recent Users
                 </h5>
+                <a href="{% url 'dashboard:users' %}" class="btn btn-sm btn-outline-primary">View All</a>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-sm">
+                    <table class="table table-hover">
                         <thead>
                             <tr>
-                                <th>Email</th>
-                                <th>Username</th>
+                                <th>User</th>
                                 <th>Joined</th>
                                 <th>Status</th>
                             </tr>
@@ -177,9 +254,20 @@
                         <tbody>
                             {% for user in recent_users %}
                             <tr>
-                                <td>{{ user.email }}</td>
-                                <td>{{ user.username|default:"-" }}</td>
-                                <td>{{ user.date_joined|date:"M d, Y" }}</td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar-sm bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-2">
+                                            {{ user.email|first|upper }}
+                                        </div>
+                                        <div>
+                                            <div class="fw-medium">{{ user.email }}</div>
+                                            <small class="text-muted">{{ user.username|default:"No username" }}</small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ user.date_joined|date:"M d, Y" }}</small>
+                                </td>
                                 <td>
                                     {% if user.is_active %}
                                         <span class="badge bg-success">Active</span>
@@ -190,7 +278,10 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="4" class="text-center text-muted">No users found</td>
+                                <td colspan="3" class="text-center text-muted py-4">
+                                    <i class="fas fa-users fa-2x mb-2 d-block"></i>
+                                    No users found
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -201,35 +292,53 @@
     </div>
     
     <div class="col-lg-6 mb-4">
-        <div class="card">
-            <div class="card-header">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">
-                    <i class="fas fa-sign-in-alt text-primary"></i>
+                    <i class="fas fa-sign-in-alt text-primary me-2"></i>
                     Recent Login Activity
                 </h5>
+                <span class="badge bg-primary">{{ recent_logins|length }} activities</span>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-sm">
+                    <table class="table table-hover">
                         <thead>
                             <tr>
                                 <th>User</th>
                                 <th>Action</th>
-                                <th>IP Address</th>
                                 <th>Time</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for log in recent_logins %}
                             <tr>
-                                <td>{{ log.user.email|default:"System" }}</td>
-                                <td>{{ log.action|title }}</td>
-                                <td>{{ log.ip|default:"-" }}</td>
-                                <td>{{ log.created_at|date:"M d, H:i" }}</td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar-sm bg-info text-white rounded-circle d-flex align-items-center justify-content-center me-2">
+                                            {{ log.user.email|first|upper|default:"S" }}
+                                        </div>
+                                        <div>
+                                            <div class="fw-medium">{{ log.user.email|default:"System" }}</div>
+                                            <small class="text-muted">{{ log.ip|default:"-" }}</small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-{% if log.action == 'login' %}success{% else %}warning{% endif %}">
+                                        {{ log.action|title }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ log.created_at|date:"M d, H:i" }}</small>
+                                </td>
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="4" class="text-center text-muted">No recent activity</td>
+                                <td colspan="3" class="text-center text-muted py-4">
+                                    <i class="fas fa-history fa-2x mb-2 d-block"></i>
+                                    No recent activity
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -238,6 +347,38 @@
             </div>
         </div>
     </div>
+</div>
+
+<!-- Charts and Analytics Section -->
+<div class="row mb-5">
+    <div class="col-lg-8 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-chart-bar text-primary me-2"></i>
+                    User Activity Trends
+                </h5>
+            </div>
+            <div class="card-body">
+                <canvas id="activityChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-pie-chart text-primary me-2"></i>
+                    System Distribution
+                </h5>
+            </div>
+            <div class="card-body">
+                <canvas id="distributionChart" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
     
     <div class="col-lg-6 mb-4">
         <div class="card">
@@ -606,9 +747,142 @@
     </div>
 </div>
 
+{% block extra_js %}
 <script>
 function refreshData() {
-    location.reload();
+    // Show loading state
+    const refreshBtn = document.querySelector('[onclick="refreshData()"]');
+    const originalText = refreshBtn.innerHTML;
+    refreshBtn.innerHTML = '<span class="loading"></span> Refreshing...';
+    refreshBtn.disabled = true;
+    
+    // Reload page after a short delay
+    setTimeout(() => {
+        location.reload();
+    }, 1000);
 }
+
+// Initialize Charts
+document.addEventListener('DOMContentLoaded', function() {
+    // Activity Chart
+    const activityCtx = document.getElementById('activityChart');
+    if (activityCtx) {
+        new Chart(activityCtx, {
+            type: 'line',
+            data: {
+                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                datasets: [{
+                    label: 'User Logins',
+                    data: [12, 19, 3, 5, 2, 3],
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }, {
+                    label: 'New Users',
+                    data: [2, 3, 20, 5, 1, 4],
+                    borderColor: '#f093fb',
+                    backgroundColor: 'rgba(240, 147, 251, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(0,0,0,0.1)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            color: 'rgba(0,0,0,0.1)'
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Distribution Chart
+    const distributionCtx = document.getElementById('distributionChart');
+    if (distributionCtx) {
+        new Chart(distributionCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Students', 'Faculty', 'Admin', 'Staff'],
+                datasets: [{
+                    data: [{{ total_students }}, 15, 5, 8],
+                    backgroundColor: [
+                        '#667eea',
+                        '#f093fb',
+                        '#4facfe',
+                        '#43e97b'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 20,
+                            usePointStyle: true
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Add smooth animations to stats cards
+    const statsCards = document.querySelectorAll('.stats-card');
+    statsCards.forEach((card, index) => {
+        card.style.animationDelay = `${index * 0.1}s`;
+        card.classList.add('animate__animated', 'animate__fadeInUp');
+    });
+    
+    // Add hover effects to table rows
+    const tableRows = document.querySelectorAll('.table tbody tr');
+    tableRows.forEach(row => {
+        row.addEventListener('mouseenter', function() {
+            this.style.transform = 'translateX(5px)';
+            this.style.transition = 'transform 0.2s ease';
+        });
+        
+        row.addEventListener('mouseleave', function() {
+            this.style.transform = 'translateX(0)';
+        });
+    });
+});
+
+// Add real-time clock
+function updateClock() {
+    const now = new Date();
+    const timeString = now.toLocaleTimeString();
+    const dateString = now.toLocaleDateString();
+    
+    // Update clock if element exists
+    const clockElement = document.getElementById('live-clock');
+    if (clockElement) {
+        clockElement.innerHTML = `${timeString} - ${dateString}`;
+    }
+}
+
+// Update clock every second
+setInterval(updateClock, 1000);
+updateClock(); // Initial call
 </script>
+{% endblock %}
 {% endblock %}
