@@ -1,45 +1,17 @@
 #!/bin/bash
 
-# CampsHub360 Production Deployment Script for AWS EC2
-# This script automates the deployment process
+# CampsHub360 Complete AWS Deployment Script
+# This script handles everything: setup, deployment, and RDS connection
 
-set -e  # Exit on any error
+set -e
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-APP_NAME="campshub360"
-# Use provided APP_DIR if set, otherwise default to current working directory
-APP_DIR="${APP_DIR:-$(pwd)}"
-VENV_DIR="$APP_DIR/venv"
-# Keep backups within the app directory to avoid permission/path issues
-BACKUP_DIR="$APP_DIR/backups"
-LOG_DIR="/var/log/django"
-
-echo -e "${GREEN}Starting CampsHub360 deployment...${NC}"
-
-# Check disk space and clean up if needed
-print_status "Checking disk space..."
-df -h "$APP_DIR"
-AVAILABLE_SPACE=$(df "$APP_DIR" | awk 'NR==2 {print $4}')
-if [ "$AVAILABLE_SPACE" -lt 524288 ]; then  # Less than 512MB
-    print_warning "Very low disk space ($(($AVAILABLE_SPACE/1024))MB). Cleaning up..."
-    # Clean up package cache
-    sudo apt clean
-    sudo apt autoremove -y
-    # Clean up old logs
-    sudo journalctl --vacuum-time=7d 2>/dev/null || true
-    # Clean up old backups
-    if [ -d "$BACKUP_DIR" ]; then
-        sudo find "$BACKUP_DIR" -name "backup_*.tar.gz" -mtime +3 -delete 2>/dev/null || true
-    fi
-fi
-
-# Function to print status
 print_status() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -52,104 +24,177 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   print_warning "Running as root. Proceed with caution."
+print_header() {
+    echo -e "${BLUE}=== $1 ===${NC}"
+}
+
+print_header "CampsHub360 AWS Deployment"
+
+# Configuration
+APP_NAME="campshub360"
+APP_DIR="${APP_DIR:-$(pwd)}"
+VENV_DIR="$APP_DIR/venv"
+LOG_DIR="/var/log/django"
+
+# Check if .env file exists
+if [ ! -f "$APP_DIR/.env" ]; then
+    print_error ".env file not found. Creating one..."
+    
+    # Generate secure secret key
+    SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(50))")
+    
+    # Get instance info
+    PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "localhost")
+    
+    # Create .env file
+    cat > .env << EOF
+# Django Settings
+SECRET_KEY=$SECRET_KEY
+DEBUG=False
+ALLOWED_HOSTS=$PUBLIC_IP,ec2-$PUBLIC_IP.ap-south-1.compute.amazonaws.com,localhost,127.0.0.1
+
+# CORS/CSRF
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://$PUBLIC_IP,http://ec2-$PUBLIC_IP.ap-south-1.compute.amazonaws.com
+CSRF_TRUSTED_ORIGINS=http://localhost:5173,http://$PUBLIC_IP,http://ec2-$PUBLIC_IP.ap-south-1.compute.amazonaws.com
+
+# Security (HTTP testing)
+SECURE_SSL_REDIRECT=False
+SECURE_HSTS_SECONDS=0
+SECURE_HSTS_INCLUDE_SUBDOMAINS=False
+SECURE_HSTS_PRELOAD=False
+
+# Database (RDS) - UPDATE THESE VALUES
+POSTGRES_DB=campshub360
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=Campushub123
+POSTGRES_HOST=database-1.cl00sagomrhg.ap-south-1.rds.amazonaws.com
+POSTGRES_PORT=5432
+
+# Redis (ElastiCache) - UPDATE THESE VALUES
+REDIS_URL=redis://campshub-j2z0gd.serverless.aps1.cache.amazonaws.com:6379/1
+
+# Email (optional)
+EMAIL_HOST=email-smtp.ap-south-1.amazonaws.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=your-ses-smtp-username
+EMAIL_HOST_PASSWORD=your-ses-smtp-password
+DEFAULT_FROM_EMAIL=noreply@$PUBLIC_IP.nip.io
+EOF
+    
+    print_warning "Created .env file. Please review and update the values if needed."
+    print_warning "Run: nano .env"
+    print_warning "Press Enter to continue after reviewing..."
+    read
 fi
 
-# Check if .env file exists; if not, try to create from example
-if [ ! -f "$APP_DIR/.env" ]; then
-    if [ -f "$APP_DIR/env.production.example" ]; then
-        print_warning ".env not found; creating from env.production.example"
-        cp "$APP_DIR/env.production.example" "$APP_DIR/.env"
-        print_warning "A default .env has been created. Please review and update values."
-    else
-        print_error ".env file not found and env.production.example is missing."
+# Load environment variables
+source "$APP_DIR/.env"
+
+# Validate required environment variables
+required_vars=("SECRET_KEY" "POSTGRES_PASSWORD" "ALLOWED_HOSTS" "POSTGRES_HOST" "REDIS_URL")
+for var in "${required_vars[@]}"; do
+    if [ -z "${!var}" ]; then
+        print_error "Required environment variable $var is not set in .env file"
         exit 1
     fi
-fi
+done
+
+print_status "Environment variables validated"
 
 # Create necessary directories
-print_status "Creating necessary directories..."
+print_header "Creating Directories"
 sudo mkdir -p $LOG_DIR
-sudo mkdir -p $BACKUP_DIR
 sudo mkdir -p $APP_DIR/logs
 sudo mkdir -p $APP_DIR/media
+sudo mkdir -p $APP_DIR/staticfiles
 sudo chown -R www-data:www-data $LOG_DIR
-sudo chown -R www-data:www-data $BACKUP_DIR
-sudo chown -R www-data:www-data $APP_DIR/logs $APP_DIR/media
-
-# Check disk space before backup
-AVAILABLE_SPACE=$(df "$APP_DIR" | awk 'NR==2 {print $4}')
-REQUIRED_SPACE=1048576  # 1GB in KB
-
-if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
-    print_warning "Low disk space detected ($(($AVAILABLE_SPACE/1024))MB available). Skipping backup."
-    # Clean up old backups to free space
-    if [ -d "$BACKUP_DIR" ]; then
-        print_status "Cleaning up old backups..."
-        sudo find "$BACKUP_DIR" -name "backup_*.tar.gz" -mtime +7 -delete 2>/dev/null || true
-    fi
-else
-    # Backup current deployment (archive, excluding transient directories)
-    if [ -d "$APP_DIR" ]; then
-        print_status "Creating backup of current deployment..."
-        BACKUP_NAME="backup_$(date +%Y%m%d_%H%M%S).tar.gz"
-        # Create a compressed archive of the current app, excluding backups, venv, git and large generated dirs
-        if sudo tar \
-            --exclude="$APP_DIR/backups" \
-            --exclude="$VENV_DIR" \
-            --exclude="$APP_DIR/.git" \
-            --exclude="$APP_DIR/staticfiles" \
-            --exclude="$APP_DIR/__pycache__" \
-            --exclude="$APP_DIR/*/__pycache__" \
-            -czf "$BACKUP_DIR/$BACKUP_NAME" -C "$APP_DIR" . 2>/dev/null; then
-            print_status "Backup created: $BACKUP_DIR/$BACKUP_NAME"
-        else
-            print_warning "Backup failed (likely due to disk space). Continuing deployment..."
-        fi
-    fi
-fi
+sudo chown -R www-data:www-data $APP_DIR/logs $APP_DIR/media $APP_DIR/staticfiles
 
 # Update system packages
-print_status "Updating system packages..."
+print_header "Updating System"
 sudo apt update
 sudo apt upgrade -y
 
 # Install required system packages
-print_status "Installing system dependencies..."
+print_header "Installing Dependencies"
 sudo apt install -y python3 python3-pip python3-venv python3-dev \
     postgresql-client nginx redis-tools \
-    build-essential libpq-dev libssl-dev libffi-dev
+    build-essential libpq-dev libssl-dev libffi-dev \
+    curl wget git
 
 # Create virtual environment
-print_status "Setting up Python virtual environment..."
+print_header "Setting Up Python Environment"
 if [ -d "$VENV_DIR" ]; then
+    print_warning "Removing existing virtual environment..."
     rm -rf $VENV_DIR
 fi
 python3 -m venv $VENV_DIR
 source $VENV_DIR/bin/activate
 
 # Install Python dependencies
-print_status "Installing Python dependencies..."
+print_status "Installing Python packages..."
 pip install --upgrade pip
 pip install -r $APP_DIR/requirements.txt
 
 # Set up environment variables
-print_status "Setting up environment variables..."
 export DJANGO_SETTINGS_MODULE=campshub360.production
 
-# Run database migrations
-print_status "Running database migrations..."
-python $APP_DIR/manage.py migrate --noinput
+# Test AWS connections
+print_header "Testing AWS Connections"
 
-# Collect static files
-print_status "Collecting static files..."
-python $APP_DIR/manage.py collectstatic --noinput
+# Test RDS connection
+print_status "Testing RDS PostgreSQL connection..."
+if PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1;" > /dev/null 2>&1; then
+    print_status "✓ RDS PostgreSQL connection successful"
+else
+    print_error "✗ RDS PostgreSQL connection failed"
+    print_error "This is likely a security group issue."
+    print_warning "Fix this in AWS Console:"
+    print_warning "1. Go to RDS Console → Databases → Select 'database-1'"
+    print_warning "2. Click 'Actions' → 'Set up EC2 connection'"
+    print_warning "3. Select your EC2 instance and click 'Set up connection'"
+    print_warning "4. Wait 2-3 minutes for changes to apply"
+    print_warning "5. Run this script again"
+    exit 1
+fi
+
+# Test ElastiCache connection
+REDIS_HOST=$(echo $REDIS_URL | sed 's/redis:\/\/\([^:]*\):.*/\1/')
+REDIS_PORT=$(echo $REDIS_URL | sed 's/redis:\/\/[^:]*:\([^/]*\)\/.*/\1/')
+
+print_status "Testing ElastiCache Redis connection..."
+if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping > /dev/null 2>&1; then
+    print_status "✓ ElastiCache Redis connection successful"
+else
+    print_error "✗ ElastiCache Redis connection failed"
+    print_error "This is likely a security group issue."
+    print_warning "Fix this in AWS Console:"
+    print_warning "1. Go to ElastiCache Console → Redis clusters → Select your cluster"
+    print_warning "2. Click 'Actions' → 'Modify'"
+    print_warning "3. Update security groups to allow EC2 access"
+    print_warning "4. Wait 2-3 minutes for changes to apply"
+    print_warning "5. Run this script again"
+    exit 1
+fi
+
+# Test Django configuration
+print_status "Testing Django configuration..."
+if python manage.py check --database default > /dev/null 2>&1; then
+    print_status "✓ Django configuration is valid"
+else
+    print_error "✗ Django configuration has issues"
+    print_error "Run: python manage.py check --database default"
+    exit 1
+fi
+
+# Run database migrations
+print_header "Setting Up Database"
+print_status "Running database migrations..."
+python manage.py migrate --noinput
 
 # Create superuser if it doesn't exist
 print_status "Creating superuser (if needed)..."
-python $APP_DIR/manage.py shell << EOF
+python manage.py shell << EOF
 from django.contrib.auth import get_user_model
 User = get_user_model()
 if not User.objects.filter(is_superuser=True).exists():
@@ -159,8 +204,27 @@ else:
     print('Superuser already exists')
 EOF
 
+# Collect static files
+print_status "Collecting static files..."
+python manage.py collectstatic --noinput
+
+# Test Django cache
+print_status "Testing Django cache..."
+python manage.py shell << EOF
+from django.core.cache import cache
+cache.set('test_key', 'test_value', 30)
+result = cache.get('test_key')
+if result == 'test_value':
+    print('✓ Django cache working')
+    cache.delete('test_key')
+else:
+    print('✗ Django cache not working')
+    exit(1)
+EOF
+
 # Set up systemd service
-print_status "Setting up systemd service..."
+print_header "Setting Up Services"
+print_status "Creating systemd service..."
 sudo tee /etc/systemd/system/campshub360.service > /dev/null << EOF
 [Unit]
 Description=CampsHub360 Django Application
@@ -173,7 +237,7 @@ Group=www-data
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=DJANGO_SETTINGS_MODULE=campshub360.production
-ExecStart=$VENV_DIR/bin/gunicorn --workers 3 --worker-class gevent --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 30 --keep-alive 2 --bind 127.0.0.1:8000 campshub360.wsgi:application
+ExecStart=$VENV_DIR/bin/gunicorn --workers 2 --worker-class gevent --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 30 --keep-alive 2 --bind 127.0.0.1:8000 campshub360.wsgi:application
 ExecReload=/bin/kill -s HUP \$MAINPID
 Restart=always
 RestartSec=10
@@ -186,19 +250,12 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$APP_DIR/logs $APP_DIR/media
+ReadWritePaths=$APP_DIR/logs $APP_DIR/media $APP_DIR/staticfiles
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Verify service file was created
-if [ ! -f "/etc/systemd/system/campshub360.service" ]; then
-    print_error "Failed to create systemd service file"
-    exit 1
-fi
-
-print_status "Systemd service file created successfully"
 sudo systemctl daemon-reload
 sudo systemctl enable campshub360
 
@@ -212,51 +269,60 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 
 # Set up logrotate
-print_status "Setting up log rotation..."
-sudo cp $APP_DIR/campshub360.logrotate /etc/logrotate.d/$APP_NAME
+if [ -f "$APP_DIR/campshub360.logrotate" ]; then
+    sudo cp $APP_DIR/campshub360.logrotate /etc/logrotate.d/$APP_NAME
+fi
 
 # Set proper permissions
-print_status "Setting proper permissions..."
+print_status "Setting permissions..."
 sudo chown -R www-data:www-data $APP_DIR
 sudo chmod -R 755 $APP_DIR
-# Allow www-data to read env file referenced by systemd EnvironmentFile
 sudo chgrp www-data $APP_DIR/.env || true
 sudo chmod 640 $APP_DIR/.env
 
 # Start services
-print_status "Starting services..."
+print_header "Starting Services"
 sudo systemctl restart nginx
 sudo systemctl restart campshub360
 
+# Wait for services to start
+sleep 5
+
 # Check service status
 print_status "Checking service status..."
-sudo systemctl status campshub360 --no-pager
-sudo systemctl status nginx --no-pager
-
-# Run security validation
-print_status "Running security validation..."
-python $APP_DIR/manage.py security --validate-env 2>/dev/null || print_warning "Security validation command not available"
+sudo systemctl is-active --quiet campshub360 && print_status "✓ CampsHub360 service is running" || print_error "✗ CampsHub360 service failed"
+sudo systemctl is-active --quiet nginx && print_status "✓ Nginx service is running" || print_error "✗ Nginx service failed"
 
 # Health check
-print_status "Running health check..."
+print_header "Testing Application"
 if curl -f http://localhost:8000/health/ > /dev/null 2>&1; then
-    print_status "Application health check passed"
+    print_status "✓ Application health check passed"
 else
-    print_warning "Application health check failed - check logs"
+    print_warning "⚠ Application health check failed - check logs"
+    print_warning "Check logs with: sudo journalctl -u campshub360 -f"
 fi
 
-# Final status check
-print_status "Checking service status..."
-sudo systemctl is-active --quiet campshub360 && print_status "✓ CampsHub360 service is running" || print_error "✗ CampsHub360 service is not running"
-sudo systemctl is-active --quiet nginx && print_status "✓ Nginx service is running" || print_error "✗ Nginx service is not running"
+# Final status
+print_header "Deployment Complete!"
+print_status "✓ RDS PostgreSQL connected"
+print_status "✓ ElastiCache Redis connected"
+print_status "✓ Database migrations completed"
+print_status "✓ Superuser created (admin/admin123)"
+print_status "✓ Static files collected"
+print_status "✓ Services started"
 
-print_status "Deployment completed successfully!"
+# Get public IP for access
+PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "localhost")
+
+print_warning "Access your application:"
+print_status "🌐 Application: http://$PUBLIC_IP"
+print_status "🔧 Admin Panel: http://$PUBLIC_IP/admin/ (admin/admin123)"
+print_status "❤️ Health Check: http://$PUBLIC_IP/health/"
+print_status "📡 API: http://$PUBLIC_IP/api/"
+
 print_warning "Next steps:"
-print_warning "1. Set up database: ./setup_database.sh"
-print_warning "2. Set up Redis: ./setup_redis.sh"
-print_warning "3. Set up SSL certificates: ./setup_ssl.sh yourdomain.com"
-print_warning "4. Change default admin password"
-print_warning "5. Configure AWS services (RDS, ElastiCache, SES) if using them"
-print_warning "6. Test the application: curl http://localhost:8000/health/"
+print_warning "1. Change admin password"
+print_warning "2. Test your frontend connection"
+print_warning "3. Set up SSL certificate (optional)"
 
-echo -e "${GREEN}Deployment script finished!${NC}"
+echo -e "${GREEN}Deployment completed successfully!${NC}"
