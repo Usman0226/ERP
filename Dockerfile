@@ -34,11 +34,18 @@ COPY . /app/
 # Create directories for static and media files
 RUN mkdir -p /app/staticfiles /app/media
 
+# Ensure log directory/file exists for Django file handler
+RUN mkdir -p /var/log/django \
+    && touch /var/log/django/campshub360.log \
+    && chmod 664 /var/log/django/campshub360.log \
+    && chown -R root:root /var/log/django
+
 # Removed non-existent build script steps
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app \
+    && chown -R appuser:appuser /var/log/django
 USER appuser
 
 # Expose port
