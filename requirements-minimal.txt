@@ -46,6 +46,7 @@ django-storages==1.14.4
 
 # File Processing
 python-magic==0.4.27
+reportlab==4.2.5
 
 # API Documentation
 drf-spectacular==0.28.0

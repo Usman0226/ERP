@@ -29,6 +29,14 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY environment variable must be set")
 
+# Validate SECRET_KEY strength
+if len(SECRET_KEY) < 50 or SECRET_KEY == 'change-this-to-a-strong-secret':
+    import warnings
+    warnings.warn(
+        "SECRET_KEY is too weak or using default value. Please set a strong, random SECRET_KEY in production.",
+        UserWarning
+    )
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
@@ -240,33 +248,62 @@ LOGIN_URL = 'dashboard:login'
 LOGIN_REDIRECT_URL = 'dashboard:home'
 LOGOUT_REDIRECT_URL = 'dashboard:login'
 
-# Caching - Using local memory cache (Redis compatibility issues fixed)
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake',
-        'TIMEOUT': int(os.getenv('CACHE_DEFAULT_TIMEOUT', '300')),
-        'OPTIONS': {
-            'MAX_ENTRIES': 1000,
-        }
-    },
-    'sessions': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake-sessions',
-        'TIMEOUT': int(os.getenv('SESSION_CACHE_TIMEOUT', '86400')),  # 24 hours
-        'OPTIONS': {
-            'MAX_ENTRIES': 1000,
-        }
-    },
-    'query_cache': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake-query',
-        'TIMEOUT': int(os.getenv('QUERY_CACHE_TIMEOUT', '600')),  # 10 minutes
-        'OPTIONS': {
-            'MAX_ENTRIES': 1000,
+# Caching - Redis if available, fallback to local memory cache
+if os.getenv('REDIS_URL'):
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': os.getenv('REDIS_URL'),
+            'TIMEOUT': int(os.getenv('CACHE_DEFAULT_TIMEOUT', '300')),
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            }
+        },
+        'sessions': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': os.getenv('REDIS_URL'),
+            'TIMEOUT': int(os.getenv('SESSION_CACHE_TIMEOUT', '86400')),  # 24 hours
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            }
+        },
+        'query_cache': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': os.getenv('REDIS_URL'),
+            'TIMEOUT': int(os.getenv('QUERY_CACHE_TIMEOUT', '600')),  # 10 minutes
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            }
         }
     }
-}
+else:
+    # Fallback to local memory cache
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake',
+            'TIMEOUT': int(os.getenv('CACHE_DEFAULT_TIMEOUT', '300')),
+            'OPTIONS': {
+                'MAX_ENTRIES': 1000,
+            }
+        },
+        'sessions': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake-sessions',
+            'TIMEOUT': int(os.getenv('SESSION_CACHE_TIMEOUT', '86400')),  # 24 hours
+            'OPTIONS': {
+                'MAX_ENTRIES': 1000,
+            }
+        },
+        'query_cache': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake-query',
+            'TIMEOUT': int(os.getenv('QUERY_CACHE_TIMEOUT', '600')),  # 10 minutes
+            'OPTIONS': {
+                'MAX_ENTRIES': 1000,
+            }
+        }
+    }
 
 # Cache session engine for high performance
 SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
@@ -276,9 +313,6 @@ SESSION_CACHE_ALIAS = 'sessions'
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
-SECURE_HSTS_SECONDS = 31536000  # 1 year
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
 SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
 
 # CSRF Protection
@@ -312,3 +346,42 @@ CORS_ALLOW_CREDENTIALS = True
 
 # CSRF settings
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
+
+# Redis Configuration
+REDIS_URL = os.getenv('REDIS_URL')
+
+# Email Configuration
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@campushub360.com')
+
+# Gunicorn Configuration
+GUNICORN_BIND = os.getenv('GUNICORN_BIND', '127.0.0.1:8000')
+GUNICORN_WORKERS = int(os.getenv('GUNICORN_WORKERS', '4'))
+GUNICORN_WORKER_CLASS = os.getenv('GUNICORN_WORKER_CLASS', 'sync')
+GUNICORN_WORKER_CONNECTIONS = int(os.getenv('GUNICORN_WORKER_CONNECTIONS', '1000'))
+GUNICORN_TIMEOUT = int(os.getenv('GUNICORN_TIMEOUT', '30'))
+GUNICORN_KEEPALIVE = int(os.getenv('GUNICORN_KEEPALIVE', '5'))
+GUNICORN_MAX_REQUESTS = int(os.getenv('GUNICORN_MAX_REQUESTS', '1000'))
+GUNICORN_MAX_REQUESTS_JITTER = int(os.getenv('GUNICORN_MAX_REQUESTS_JITTER', '100'))
+
+# Update Security Settings to use environment variables
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))  # 0 for development, 31536000 for production
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'False').lower() == 'true'
+SECURE_HSTS_PRELOAD = os.getenv('SECURE_HSTS_PRELOAD', 'False').lower() == 'true'
+
+# Production security settings (only enabled when not in debug mode)
+if not DEBUG:
+    # Enable HSTS only in production
+    if SECURE_HSTS_SECONDS == 0:
+        SECURE_HSTS_SECONDS = 31536000  # 1 year
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+        SECURE_HSTS_PRELOAD = True
+    
+    # Enable secure cookies in production
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
