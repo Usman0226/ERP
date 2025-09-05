@@ -69,15 +69,12 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'campshub360.middleware.PerformanceMonitoringMiddleware',
-    'campshub360.middleware.SecurityHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'campshub360.middleware.HighPerformanceRateLimitMiddleware',
 ]
 
 ROOT_URLCONF = 'campshub360.urls'
@@ -132,8 +129,7 @@ DATABASES = {
     }
 }
 
-# Database Router for Read Replicas
-DATABASE_ROUTERS = ['campshub360.db_router.DatabaseRouter']
+# Database configuration
 
 
 # Password validation

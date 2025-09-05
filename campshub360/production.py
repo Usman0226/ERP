@@ -34,9 +34,7 @@ DATABASES = {
     }
 }
 
-# Remove read replica for production simplicity
-DATABASES.pop('read_replica', None)
-DATABASE_ROUTERS = []
+# Single database configuration for production
 
 # Static files - use AWS S3 or serve via nginx
 STATIC_URL = '/static/'
@@ -76,9 +74,28 @@ CACHES = {
             'CONNECTION_POOL_KWARGS': {
                 'max_connections': 50,
                 'retry_on_timeout': True,
+                'socket_keepalive': True,
+                'socket_keepalive_options': {},
+            },
+            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
+            'IGNORE_EXCEPTIONS': True,
+        },
+        'TIMEOUT': int(os.getenv('CACHE_DEFAULT_TIMEOUT', '300')),
+        'KEY_PREFIX': 'campshub360',
+        'VERSION': 1,
+    },
+    'sessions': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 50,
+                'retry_on_timeout': True,
             }
         },
-        'TIMEOUT': 300,
+        'TIMEOUT': int(os.getenv('SESSION_CACHE_TIMEOUT', '86400')),
+        'KEY_PREFIX': 'campshub360_sessions',
     }
 }
 
@@ -165,11 +182,10 @@ if os.getenv('USE_S3', 'False').lower() == 'true':
     DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
     MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/media/'
 
-# Remove development middleware
+# Production middleware
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
-    'campshub360.middleware.SecurityHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',

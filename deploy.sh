@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# CampsHub360 Complete AWS Deployment Script
-# This script handles everything: setup, deployment, and RDS connection
+# CampsHub360 Simple AWS EC2 Deployment Script
+# Optimized for production deployment
 
 set -e
 
@@ -28,13 +28,13 @@ print_header() {
     echo -e "${BLUE}=== $1 ===${NC}"
 }
 
-print_header "CampsHub360 AWS Deployment"
+print_header "CampsHub360 AWS EC2 Deployment"
 
 # Configuration
 APP_NAME="campshub360"
 APP_DIR="${APP_DIR:-$(pwd)}"
 VENV_DIR="$APP_DIR/venv"
-LOG_DIR="/var/log/django"
+SERVICE_USER="www-data"
 
 # Check if .env file exists
 if [ ! -f "$APP_DIR/.env" ]; then
@@ -51,34 +51,22 @@ if [ ! -f "$APP_DIR/.env" ]; then
 # Django Settings
 SECRET_KEY=$SECRET_KEY
 DEBUG=False
-ALLOWED_HOSTS=$PUBLIC_IP,ec2-$PUBLIC_IP.ap-south-1.compute.amazonaws.com,localhost,127.0.0.1
+ALLOWED_HOSTS=$PUBLIC_IP,localhost,127.0.0.1
 
-# CORS/CSRF
-CORS_ALLOWED_ORIGINS=http://localhost:5173,http://$PUBLIC_IP,http://ec2-$PUBLIC_IP.ap-south-1.compute.amazonaws.com
-CSRF_TRUSTED_ORIGINS=http://localhost:5173,http://$PUBLIC_IP,http://ec2-$PUBLIC_IP.ap-south-1.compute.amazonaws.com
-
-# Security (HTTP testing)
-SECURE_SSL_REDIRECT=False
-SECURE_HSTS_SECONDS=0
-SECURE_HSTS_INCLUDE_SUBDOMAINS=False
-SECURE_HSTS_PRELOAD=False
-
-# Database (RDS) - UPDATE THESE VALUES
+# Database (AWS RDS) - UPDATE THESE VALUES
 POSTGRES_DB=campshub360
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=Campushub123
 POSTGRES_HOST=database-1.cl00sagomrhg.ap-south-1.rds.amazonaws.com
 POSTGRES_PORT=5432
 
-# Redis (ElastiCache) - UPDATE THESE VALUES
+# Redis (AWS ElastiCache) - UPDATE THESE VALUES
 REDIS_URL=redis://campshub-j2z0gd.serverless.aps1.cache.amazonaws.com:6379/1
 
-# Email (optional)
-EMAIL_HOST=email-smtp.ap-south-1.amazonaws.com
-EMAIL_PORT=587
-EMAIL_HOST_USER=your-ses-smtp-username
-EMAIL_HOST_PASSWORD=your-ses-smtp-password
-DEFAULT_FROM_EMAIL=noreply@$PUBLIC_IP.nip.io
+# Performance Settings
+GUNICORN_WORKERS=4
+GUNICORN_WORKER_CLASS=gevent
+GUNICORN_WORKER_CONNECTIONS=1000
 EOF
     
     print_warning "Created .env file. Please review and update the values if needed."
@@ -101,38 +89,27 @@ done
 
 print_status "Environment variables validated"
 
-# Create necessary directories
-print_header "Creating Directories"
-sudo mkdir -p $LOG_DIR
-sudo mkdir -p $APP_DIR/logs
-sudo mkdir -p $APP_DIR/media
-sudo mkdir -p $APP_DIR/staticfiles
-sudo chown -R www-data:www-data $LOG_DIR
-sudo chown -R www-data:www-data $APP_DIR/logs $APP_DIR/media $APP_DIR/staticfiles
-
 # Update system packages
-print_header "Updating System"
+print_header "System Setup"
 sudo apt update
 sudo apt upgrade -y
 
 # Install required system packages
-print_header "Installing Dependencies"
 sudo apt install -y python3 python3-pip python3-venv python3-dev \
-    postgresql-client nginx redis-tools \
-    build-essential libpq-dev libssl-dev libffi-dev \
-    curl wget git
+    postgresql-client nginx redis-tools build-essential libpq-dev \
+    libssl-dev libffi-dev curl wget git
 
 # Create virtual environment
-print_header "Setting Up Python Environment"
+print_header "Python Environment Setup"
 if [ -d "$VENV_DIR" ]; then
     print_warning "Removing existing virtual environment..."
     rm -rf $VENV_DIR
 fi
+
 python3 -m venv $VENV_DIR
 source $VENV_DIR/bin/activate
 
 # Install Python dependencies
-print_status "Installing Python packages..."
 pip install --upgrade pip
 pip install -r $APP_DIR/requirements.txt
 
@@ -148,13 +125,7 @@ if PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" 
     print_status "✓ RDS PostgreSQL connection successful"
 else
     print_error "✗ RDS PostgreSQL connection failed"
-    print_error "This is likely a security group issue."
-    print_warning "Fix this in AWS Console:"
-    print_warning "1. Go to RDS Console → Databases → Select 'database-1'"
-    print_warning "2. Click 'Actions' → 'Set up EC2 connection'"
-    print_warning "3. Select your EC2 instance and click 'Set up connection'"
-    print_warning "4. Wait 2-3 minutes for changes to apply"
-    print_warning "5. Run this script again"
+    print_warning "Please check your RDS security groups and connection details"
     exit 1
 fi
 
@@ -167,29 +138,12 @@ if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping > /dev/null 2>&1; then
     print_status "✓ ElastiCache Redis connection successful"
 else
     print_error "✗ ElastiCache Redis connection failed"
-    print_error "This is likely a security group issue."
-    print_warning "Fix this in AWS Console:"
-    print_warning "1. Go to ElastiCache Console → Redis clusters → Select your cluster"
-    print_warning "2. Click 'Actions' → 'Modify'"
-    print_warning "3. Update security groups to allow EC2 access"
-    print_warning "4. Wait 2-3 minutes for changes to apply"
-    print_warning "5. Run this script again"
-    exit 1
-fi
-
-# Test Django configuration
-print_status "Testing Django configuration..."
-if python manage.py check --database default > /dev/null 2>&1; then
-    print_status "✓ Django configuration is valid"
-else
-    print_error "✗ Django configuration has issues"
-    print_error "Run: python manage.py check --database default"
+    print_warning "Please check your ElastiCache security groups and connection details"
     exit 1
 fi
 
 # Run database migrations
-print_header "Setting Up Database"
-print_status "Running database migrations..."
+print_header "Database Setup"
 python manage.py migrate --noinput
 
 # Create superuser if it doesn't exist
@@ -208,23 +162,8 @@ EOF
 print_status "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# Test Django cache
-print_status "Testing Django cache..."
-python manage.py shell << EOF
-from django.core.cache import cache
-cache.set('test_key', 'test_value', 30)
-result = cache.get('test_key')
-if result == 'test_value':
-    print('✓ Django cache working')
-    cache.delete('test_key')
-else:
-    print('✗ Django cache not working')
-    exit(1)
-EOF
-
 # Set up systemd service
-print_header "Setting Up Services"
-print_status "Creating systemd service..."
+print_header "Service Configuration"
 sudo tee /etc/systemd/system/campshub360.service > /dev/null << EOF
 [Unit]
 Description=CampsHub360 Django Application
@@ -232,25 +171,14 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+User=$SERVICE_USER
+Group=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=DJANGO_SETTINGS_MODULE=campshub360.production
-ExecStart=$VENV_DIR/bin/gunicorn --workers 2 --worker-class gevent --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 30 --keep-alive 2 --bind 127.0.0.1:8000 campshub360.wsgi:application
-ExecReload=/bin/kill -s HUP \$MAINPID
+ExecStart=$VENV_DIR/bin/gunicorn --workers 4 --worker-class gevent --bind 127.0.0.1:8000 campshub360.wsgi:application
 Restart=always
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=campshub360
-
-# Security settings
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$APP_DIR/logs $APP_DIR/media $APP_DIR/staticfiles
 
 [Install]
 WantedBy=multi-user.target
@@ -268,16 +196,11 @@ sudo rm -f /etc/nginx/sites-enabled/default
 # Test nginx configuration
 sudo nginx -t
 
-# Set up logrotate
-if [ -f "$APP_DIR/campshub360.logrotate" ]; then
-    sudo cp $APP_DIR/campshub360.logrotate /etc/logrotate.d/$APP_NAME
-fi
-
 # Set proper permissions
 print_status "Setting permissions..."
-sudo chown -R www-data:www-data $APP_DIR
+sudo chown -R $SERVICE_USER:$SERVICE_USER $APP_DIR
 sudo chmod -R 755 $APP_DIR
-sudo chgrp www-data $APP_DIR/.env || true
+sudo chgrp $SERVICE_USER $APP_DIR/.env || true
 sudo chmod 640 $APP_DIR/.env
 
 # Start services
