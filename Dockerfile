@@ -17,6 +17,8 @@ RUN apt-get update \
         libpq-dev \
         libssl-dev \
         libffi-dev \
+        python3-dev \
+        pkg-config \
         curl \
         git \
         && rm -rf /var/lib/apt/lists/*
