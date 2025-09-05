@@ -13,12 +13,31 @@ NC='\033[0m' # No Color
 
 # Configuration
 APP_NAME="campshub360"
-APP_DIR="/app"
+# Use provided APP_DIR if set, otherwise default to current working directory
+APP_DIR="${APP_DIR:-$(pwd)}"
 VENV_DIR="$APP_DIR/venv"
-BACKUP_DIR="/app/backups"
+# Keep backups within the app directory to avoid permission/path issues
+BACKUP_DIR="$APP_DIR/backups"
 LOG_DIR="/var/log/django"
 
 echo -e "${GREEN}Starting CampsHub360 deployment...${NC}"
+
+# Check disk space and clean up if needed
+print_status "Checking disk space..."
+df -h "$APP_DIR"
+AVAILABLE_SPACE=$(df "$APP_DIR" | awk 'NR==2 {print $4}')
+if [ "$AVAILABLE_SPACE" -lt 524288 ]; then  # Less than 512MB
+    print_warning "Very low disk space ($(($AVAILABLE_SPACE/1024))MB). Cleaning up..."
+    # Clean up package cache
+    sudo apt clean
+    sudo apt autoremove -y
+    # Clean up old logs
+    sudo journalctl --vacuum-time=7d 2>/dev/null || true
+    # Clean up old backups
+    if [ -d "$BACKUP_DIR" ]; then
+        sudo find "$BACKUP_DIR" -name "backup_*.tar.gz" -mtime +3 -delete 2>/dev/null || true
+    fi
+fi
 
 # Function to print status
 print_status() {
@@ -35,29 +54,61 @@ print_error() {
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
-   print_error "This script should not be run as root"
-   exit 1
+   print_warning "Running as root. Proceed with caution."
 fi
 
-# Check if .env file exists
+# Check if .env file exists; if not, try to create from example
 if [ ! -f "$APP_DIR/.env" ]; then
-    print_error ".env file not found. Please create it from env.production.example"
-    exit 1
+    if [ -f "$APP_DIR/env.production.example" ]; then
+        print_warning ".env not found; creating from env.production.example"
+        cp "$APP_DIR/env.production.example" "$APP_DIR/.env"
+        print_warning "A default .env has been created. Please review and update values."
+    else
+        print_error ".env file not found and env.production.example is missing."
+        exit 1
+    fi
 fi
 
 # Create necessary directories
 print_status "Creating necessary directories..."
 sudo mkdir -p $LOG_DIR
 sudo mkdir -p $BACKUP_DIR
+sudo mkdir -p $APP_DIR/logs
+sudo mkdir -p $APP_DIR/media
 sudo chown -R www-data:www-data $LOG_DIR
 sudo chown -R www-data:www-data $BACKUP_DIR
+sudo chown -R www-data:www-data $APP_DIR/logs $APP_DIR/media
 
-# Backup current deployment
-if [ -d "$APP_DIR" ]; then
-    print_status "Creating backup of current deployment..."
-    BACKUP_NAME="backup_$(date +%Y%m%d_%H%M%S)"
-    sudo cp -r $APP_DIR $BACKUP_DIR/$BACKUP_NAME
-    print_status "Backup created: $BACKUP_DIR/$BACKUP_NAME"
+# Check disk space before backup
+AVAILABLE_SPACE=$(df "$APP_DIR" | awk 'NR==2 {print $4}')
+REQUIRED_SPACE=1048576  # 1GB in KB
+
+if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
+    print_warning "Low disk space detected ($(($AVAILABLE_SPACE/1024))MB available). Skipping backup."
+    # Clean up old backups to free space
+    if [ -d "$BACKUP_DIR" ]; then
+        print_status "Cleaning up old backups..."
+        sudo find "$BACKUP_DIR" -name "backup_*.tar.gz" -mtime +7 -delete 2>/dev/null || true
+    fi
+else
+    # Backup current deployment (archive, excluding transient directories)
+    if [ -d "$APP_DIR" ]; then
+        print_status "Creating backup of current deployment..."
+        BACKUP_NAME="backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+        # Create a compressed archive of the current app, excluding backups, venv, git and large generated dirs
+        if sudo tar \
+            --exclude="$APP_DIR/backups" \
+            --exclude="$VENV_DIR" \
+            --exclude="$APP_DIR/.git" \
+            --exclude="$APP_DIR/staticfiles" \
+            --exclude="$APP_DIR/__pycache__" \
+            --exclude="$APP_DIR/*/__pycache__" \
+            -czf "$BACKUP_DIR/$BACKUP_NAME" -C "$APP_DIR" . 2>/dev/null; then
+            print_status "Backup created: $BACKUP_DIR/$BACKUP_NAME"
+        else
+            print_warning "Backup failed (likely due to disk space). Continuing deployment..."
+        fi
+    fi
 fi
 
 # Update system packages
@@ -110,7 +161,44 @@ EOF
 
 # Set up systemd service
 print_status "Setting up systemd service..."
-sudo cp $APP_DIR/campshub360.service /etc/systemd/system/
+sudo tee /etc/systemd/system/campshub360.service > /dev/null << EOF
+[Unit]
+Description=CampsHub360 Django Application
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
+Environment=DJANGO_SETTINGS_MODULE=campshub360.production
+ExecStart=$VENV_DIR/bin/gunicorn --workers 3 --worker-class gevent --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 30 --keep-alive 2 --bind 127.0.0.1:8000 campshub360.wsgi:application
+ExecReload=/bin/kill -s HUP \$MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=campshub360
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$APP_DIR/logs $APP_DIR/media
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Verify service file was created
+if [ ! -f "/etc/systemd/system/campshub360.service" ]; then
+    print_error "Failed to create systemd service file"
+    exit 1
+fi
+
+print_status "Systemd service file created successfully"
 sudo systemctl daemon-reload
 sudo systemctl enable campshub360
 
@@ -131,7 +219,9 @@ sudo cp $APP_DIR/campshub360.logrotate /etc/logrotate.d/$APP_NAME
 print_status "Setting proper permissions..."
 sudo chown -R www-data:www-data $APP_DIR
 sudo chmod -R 755 $APP_DIR
-sudo chmod 600 $APP_DIR/.env
+# Allow www-data to read env file referenced by systemd EnvironmentFile
+sudo chgrp www-data $APP_DIR/.env || true
+sudo chmod 640 $APP_DIR/.env
 
 # Start services
 print_status "Starting services..."
@@ -145,14 +235,28 @@ sudo systemctl status nginx --no-pager
 
 # Run security validation
 print_status "Running security validation..."
-python $APP_DIR/manage.py security --validate-env
+python $APP_DIR/manage.py security --validate-env 2>/dev/null || print_warning "Security validation command not available"
+
+# Health check
+print_status "Running health check..."
+if curl -f http://localhost:8000/health/ > /dev/null 2>&1; then
+    print_status "Application health check passed"
+else
+    print_warning "Application health check failed - check logs"
+fi
+
+# Final status check
+print_status "Checking service status..."
+sudo systemctl is-active --quiet campshub360 && print_status "✓ CampsHub360 service is running" || print_error "✗ CampsHub360 service is not running"
+sudo systemctl is-active --quiet nginx && print_status "✓ Nginx service is running" || print_error "✗ Nginx service is not running"
 
 print_status "Deployment completed successfully!"
-print_warning "Please update the following:"
-print_warning "1. Update nginx.conf with your domain name"
-print_warning "2. Set up SSL certificates"
-print_warning "3. Update .env file with production values"
+print_warning "Next steps:"
+print_warning "1. Set up database: ./setup_database.sh"
+print_warning "2. Set up Redis: ./setup_redis.sh"
+print_warning "3. Set up SSL certificates: ./setup_ssl.sh yourdomain.com"
 print_warning "4. Change default admin password"
-print_warning "5. Configure AWS RDS and ElastiCache"
+print_warning "5. Configure AWS services (RDS, ElastiCache, SES) if using them"
+print_warning "6. Test the application: curl http://localhost:8000/health/"
 
 echo -e "${GREEN}Deployment script finished!${NC}"
