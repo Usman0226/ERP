@@ -57,3 +57,10 @@ raw_env = [
     'DJANGO_SETTINGS_MODULE=campshub360.production',
     'PYTHONPATH=/app',
 ]
+
+# Docker-specific optimizations
+if os.getenv('DOCKER_CONTAINER'):
+    # Use more workers in Docker
+    workers = int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 2 + 1))
+    # Use /tmp for worker temp files in Docker
+    worker_tmp_dir = "/tmp"
