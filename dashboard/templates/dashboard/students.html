@@ -18,6 +18,15 @@
             <a href="{% url 'dashboard:custom_fields' %}" class="btn btn-sm btn-outline-secondary">
                 <i class="fas fa-cogs"></i> Custom Fields
             </a>
+            <a href="{% url 'dashboard:student_divisions' %}" class="btn btn-sm btn-outline-info">
+                <i class="fas fa-sitemap"></i> Divisions
+            </a>
+            <a href="{% url 'dashboard:student_assignments' %}" class="btn btn-sm btn-outline-warning">
+                <i class="fas fa-user-plus"></i> Assignments
+            </a>
+            <a href="{% url 'dashboard:student_division_statistics' %}" class="btn btn-sm btn-outline-success">
+                <i class="fas fa-chart-bar"></i> Statistics
+            </a>
         </div>
     </div>
 </div>
@@ -77,12 +86,28 @@
                 </select>
             </div>
             <div class="col-md-2">
-                <label for="grade" class="form-label">Grade</label>
-                <select class="form-select" id="grade" name="grade">
+                <label for="year_of_study" class="form-label">Year of Study</label>
+                <select class="form-select" id="year_of_study" name="year_of_study">
                     <option value="">All</option>
-                    {% for grade, name in grade_choices %}
-                    <option value="{{ grade }}" {% if request.GET.grade == grade %}selected{% endif %}>{{ name }}</option>
-                    {% endfor %}
+                    <option value="1" {% if request.GET.year_of_study == '1' %}selected{% endif %}>1st Year</option>
+                    <option value="2" {% if request.GET.year_of_study == '2' %}selected{% endif %}>2nd Year</option>
+                    <option value="3" {% if request.GET.year_of_study == '3' %}selected{% endif %}>3rd Year</option>
+                    <option value="4" {% if request.GET.year_of_study == '4' %}selected{% endif %}>4th Year</option>
+                    <option value="5" {% if request.GET.year_of_study == '5' %}selected{% endif %}>5th Year</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="semester" class="form-label">Semester</label>
+                <select class="form-select" id="semester" name="semester">
+                    <option value="">All</option>
+                    <option value="1" {% if request.GET.semester == '1' %}selected{% endif %}>Semester 1</option>
+                    <option value="2" {% if request.GET.semester == '2' %}selected{% endif %}>Semester 2</option>
+                    <option value="3" {% if request.GET.semester == '3' %}selected{% endif %}>Semester 3</option>
+                    <option value="4" {% if request.GET.semester == '4' %}selected{% endif %}>Semester 4</option>
+                    <option value="5" {% if request.GET.semester == '5' %}selected{% endif %}>Semester 5</option>
+                    <option value="6" {% if request.GET.semester == '6' %}selected{% endif %}>Semester 6</option>
+                    <option value="7" {% if request.GET.semester == '7' %}selected{% endif %}>Semester 7</option>
+                    <option value="8" {% if request.GET.semester == '8' %}selected{% endif %}>Semester 8</option>
                 </select>
             </div>
             <div class="col-md-2">
@@ -120,7 +145,7 @@
                     <tr>
                         <th>Roll Number</th>
                         <th>Name</th>
-                        <th>Grade</th>
+                        <th>Year/Semester</th>
                         <th>Section</th>
                         <th>Status</th>
                         <th>Email</th>
@@ -140,7 +165,19 @@
                             </a>
                         </td>
                         <td>
-                            <span class="badge bg-info">{{ student.get_grade_level_display }}</span>
+                            {% if student.year_of_study and student.semester %}
+                                <span class="badge bg-info">
+                                    {% for year, name in year_choices %}
+                                        {% if year == student.year_of_study %}{{ name }}{% endif %}
+                                    {% endfor %}
+                                    - 
+                                    {% for sem, name in semester_choices %}
+                                        {% if sem == student.semester %}{{ name }}{% endif %}
+                                    {% endfor %}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">Not assigned</span>
+                            {% endif %}
                         </td>
                         <td>
                             {% if student.section %}
@@ -248,7 +285,7 @@
 {% block extra_js %}
 <script>
 // Auto-submit form on filter change
-document.querySelectorAll('select[name="status"], select[name="grade"], select[name="section"]').forEach(function(select) {
+document.querySelectorAll('select[name="status"], select[name="year_of_study"], select[name="semester"], select[name="section"]').forEach(function(select) {
     select.addEventListener('change', function() {
         this.form.submit();
     });

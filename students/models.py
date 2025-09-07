@@ -34,19 +34,25 @@ class Student(TimeStampedUUIDModel):
         ('DROPPED', 'Dropped Out'),
     ]
     
-    GRADE_CHOICES = [
-        ('1', 'Grade 1'),
-        ('2', 'Grade 2'),
-        ('3', 'Grade 3'),
-        ('4', 'Grade 4'),
-        ('5', 'Grade 5'),
-        ('6', 'Grade 6'),
-        ('7', 'Grade 7'),
-        ('8', 'Grade 8'),
-        ('9', 'Grade 9'),
-        ('10', 'Grade 10'),
-        ('11', 'Grade 11'),
-        ('12', 'Grade 12'),
+    YEAR_OF_STUDY_CHOICES = [
+        ('1', '1st Year'),
+        ('2', '2nd Year'),
+        ('3', '3rd Year'),
+        ('4', '4th Year'),
+        ('5', '5th Year'),
+    ]
+    
+    SEMESTER_CHOICES = [
+        ('1', 'Semester 1'),
+        ('2', 'Semester 2'),
+        ('3', 'Semester 3'),
+        ('4', 'Semester 4'),
+        ('5', 'Semester 5'),
+        ('6', 'Semester 6'),
+        ('7', 'Semester 7'),
+        ('8', 'Semester 8'),
+        ('9', 'Semester 9'),
+        ('10', 'Semester 10'),
     ]
     
     SECTION_CHOICES = [
@@ -93,9 +99,26 @@ class Student(TimeStampedUUIDModel):
     # Academic Information
     section = models.CharField(max_length=1, choices=SECTION_CHOICES, blank=True, null=True)
     academic_year = models.CharField(max_length=9, help_text="e.g., 2023-2024", blank=True, null=True)
-    grade_level = models.CharField(max_length=2, choices=GRADE_CHOICES)
+    year_of_study = models.CharField(max_length=1, choices=YEAR_OF_STUDY_CHOICES, default='1', help_text="Current year of study (1st, 2nd, 3rd, 4th year)")
+    semester = models.CharField(max_length=2, choices=SEMESTER_CHOICES, default='1', help_text="Current semester")
     quota = models.CharField(max_length=25, choices=QUOTA_CHOICES, blank=True, null=True)
     rank = models.IntegerField(blank=True, null=True, help_text="Academic or admission rank")
+    department = models.ForeignKey(
+        'academics.Department',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='students',
+        help_text="Student's department"
+    )
+    academic_program = models.ForeignKey(
+        'academics.AcademicProgram',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='students',
+        help_text="Student's academic program (B.Tech, MBA, MCA, etc.)"
+    )
     
     # Contact Information
     email = models.EmailField(unique=True, null=True, blank=True)
@@ -282,7 +305,8 @@ class StudentEnrollmentHistory(TimeStampedUUIDModel):
         on_delete=models.CASCADE, 
         related_name='enrollment_history'
     )
-    grade_level = models.CharField(max_length=2, choices=Student.GRADE_CHOICES)
+    year_of_study = models.CharField(max_length=1, choices=Student.YEAR_OF_STUDY_CHOICES, default='1')
+    semester = models.CharField(max_length=2, choices=Student.SEMESTER_CHOICES, default='1')
     academic_year = models.CharField(max_length=9, help_text="e.g., 2023-2024")
     enrollment_date = models.DateField()
     completion_date = models.DateField(null=True, blank=True)
@@ -295,7 +319,7 @@ class StudentEnrollmentHistory(TimeStampedUUIDModel):
         verbose_name_plural = 'Student Enrollment Histories'
     
     def __str__(self):
-        return f"{self.student.full_name} - {self.grade_level} ({self.academic_year})"
+        return f"{self.student.full_name} - {self.year_of_study} Year, Sem {self.semester} ({self.academic_year})"
 
 
 class StudentDocument(TimeStampedUUIDModel):

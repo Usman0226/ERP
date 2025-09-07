@@ -22,7 +22,8 @@ class StudentFilter(django_filters.FilterSet):
     age_max = django_filters.NumberFilter(method='age_filter_max', label='Maximum Age')
     
     # Choice filters
-    grade_level = django_filters.ChoiceFilter(choices=Student.GRADE_CHOICES)
+    year_of_study = django_filters.ChoiceFilter(choices=Student.YEAR_OF_STUDY_CHOICES)
+    semester = django_filters.ChoiceFilter(choices=Student.SEMESTER_CHOICES)
     section = django_filters.ChoiceFilter(choices=Student.SECTION_CHOICES)
     gender = django_filters.ChoiceFilter(choices=Student.GENDER_CHOICES)
     status = django_filters.ChoiceFilter(choices=Student.STATUS_CHOICES)
@@ -165,7 +166,8 @@ class StudentEnrollmentHistoryFilter(django_filters.FilterSet):
             'student__first_name': ['exact', 'icontains'],
             'student__last_name': ['exact', 'icontains'],
             'academic_year': ['exact', 'icontains'],
-            'grade_level': ['exact'],
+            'year_of_study': ['exact'],
+            'semester': ['exact'],
             'status': ['exact'],
         }
     

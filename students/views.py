@@ -59,10 +59,20 @@ class StudentViewSet(viewsets.ModelViewSet):
         if status_filter:
             queryset = queryset.filter(status=status_filter)
         
-        # Filter by grade level
-        grade_filter = self.request.query_params.get('grade_level', None)
-        if grade_filter:
-            queryset = queryset.filter(grade_level=grade_filter)
+        # Filter by year of study
+        year_filter = self.request.query_params.get('year_of_study', None)
+        if year_filter:
+            queryset = queryset.filter(year_of_study=year_filter)
+        
+        # Filter by semester
+        semester_filter = self.request.query_params.get('semester', None)
+        if semester_filter:
+            queryset = queryset.filter(semester=semester_filter)
+        
+        # Filter by academic program
+        program_filter = self.request.query_params.get('academic_program', None)
+        if program_filter:
+            queryset = queryset.filter(academic_program=program_filter)
         
         # Filter by gender
         gender_filter = self.request.query_params.get('gender', None)
@@ -83,6 +93,11 @@ class StudentViewSet(viewsets.ModelViewSet):
         religion_filter = self.request.query_params.get('religion', None)
         if religion_filter:
             queryset = queryset.filter(religion=religion_filter)
+        
+        # Filter by department
+        department_filter = self.request.query_params.get('department', None)
+        if department_filter:
+            queryset = queryset.filter(department=department_filter)
         
         return queryset.order_by('last_name', 'first_name')
     
@@ -230,6 +245,360 @@ class StudentViewSet(viewsets.ModelViewSet):
         custom_fields = CustomField.objects.filter(is_active=True)
         serializer = CustomFieldSerializer(custom_fields, many=True)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def divisions(self, request):
+        """Get students grouped by department, program, year, semester, and section"""
+        from django.db.models import Count
+        from academics.models import Department, AcademicProgram
+        
+        # Get query parameters
+        department_id = request.query_params.get('department', None)
+        academic_program_id = request.query_params.get('academic_program', None)
+        academic_year = request.query_params.get('academic_year', None)
+        year_of_study = request.query_params.get('year_of_study', None)
+        semester = request.query_params.get('semester', None)
+        section = request.query_params.get('section', None)
+        
+        # Base queryset
+        queryset = Student.objects.filter(status='ACTIVE')
+        
+        # Apply filters
+        if department_id:
+            queryset = queryset.filter(department_id=department_id)
+        if academic_program_id:
+            queryset = queryset.filter(academic_program_id=academic_program_id)
+        if academic_year:
+            queryset = queryset.filter(academic_year=academic_year)
+        if year_of_study:
+            queryset = queryset.filter(year_of_study=year_of_study)
+        if semester:
+            queryset = queryset.filter(semester=semester)
+        if section:
+            queryset = queryset.filter(section=section)
+        
+        # Group students by department, program, year, semester, and section
+        divisions = {}
+        
+        # Get all departments
+        departments = Department.objects.filter(is_active=True)
+        
+        for dept in departments:
+            dept_students = queryset.filter(department=dept)
+            if dept_students.exists():
+                divisions[dept.code] = {
+                    'department_id': dept.id,
+                    'department_name': dept.name,
+                    'department_code': dept.code,
+                    'programs': {}
+                }
+                
+                # Group by academic programs
+                programs = dept_students.values_list('academic_program', flat=True).distinct()
+                for program_id in programs:
+                    if program_id:
+                        try:
+                            program = AcademicProgram.objects.get(id=program_id)
+                            program_students = dept_students.filter(academic_program=program)
+                            
+                            divisions[dept.code]['programs'][program.code] = {
+                                'program_id': program.id,
+                                'program_name': program.name,
+                                'program_code': program.code,
+                                'program_level': program.level,
+                                'years': {}
+                            }
+                            
+                            # Group by academic year
+                            years = program_students.values_list('academic_year', flat=True).distinct()
+                            for year in years:
+                                if year:
+                                    year_students = program_students.filter(academic_year=year)
+                                    divisions[dept.code]['programs'][program.code]['years'][year] = {
+                                        'year_of_study': {},
+                                        'total_students': year_students.count()
+                                    }
+                                    
+                                    # Group by year of study
+                                    study_years = year_students.values_list('year_of_study', flat=True).distinct()
+                                    for study_year in study_years:
+                                        if study_year:
+                                            study_year_students = year_students.filter(year_of_study=study_year)
+                                            divisions[dept.code]['programs'][program.code]['years'][year]['year_of_study'][study_year] = {
+                                                'semesters': {},
+                                                'total_students': study_year_students.count()
+                                            }
+                                            
+                                            # Group by semester
+                                            semesters = study_year_students.values_list('semester', flat=True).distinct()
+                                            for sem in semesters:
+                                                if sem:
+                                                    semester_students = study_year_students.filter(semester=sem)
+                                                    divisions[dept.code]['programs'][program.code]['years'][year]['year_of_study'][study_year]['semesters'][sem] = {
+                                                        'sections': {},
+                                                        'total_students': semester_students.count()
+                                                    }
+                                                    
+                                                    # Group by section
+                                                    sections = semester_students.values_list('section', flat=True).distinct()
+                                                    for sec in sections:
+                                                        if sec:
+                                                            section_students = semester_students.filter(section=sec)
+                                                            divisions[dept.code]['programs'][program.code]['years'][year]['year_of_study'][study_year]['semesters'][sem]['sections'][sec] = {
+                                                                'students': StudentListSerializer(section_students, many=True).data,
+                                                                'count': section_students.count()
+                                                            }
+                        except AcademicProgram.DoesNotExist:
+                            continue
+        
+        return Response(divisions)
+    
+    @action(detail=False, methods=['post'])
+    def assign_students(self, request):
+        """Assign multiple students to department, program, year, semester, and section"""
+        student_ids = request.data.get('student_ids', [])
+        department_id = request.data.get('department_id')
+        academic_program_id = request.data.get('academic_program_id')
+        academic_year = request.data.get('academic_year')
+        year_of_study = request.data.get('year_of_study')
+        semester = request.data.get('semester')
+        section = request.data.get('section')
+        
+        if not student_ids:
+            return Response(
+                {'error': 'student_ids is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate department if provided
+        if department_id:
+            try:
+                from academics.models import Department
+                Department.objects.get(id=department_id, is_active=True)
+            except Department.DoesNotExist:
+                return Response(
+                    {'error': 'Invalid department'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Validate academic program if provided
+        if academic_program_id:
+            try:
+                from academics.models import AcademicProgram
+                AcademicProgram.objects.get(id=academic_program_id, is_active=True)
+            except AcademicProgram.DoesNotExist:
+                return Response(
+                    {'error': 'Invalid academic program'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Update students
+        updated_students = []
+        errors = []
+        
+        for student_id in student_ids:
+            try:
+                student = Student.objects.get(id=student_id)
+                
+                # Update fields if provided
+                if department_id:
+                    student.department_id = department_id
+                if academic_program_id:
+                    student.academic_program_id = academic_program_id
+                if academic_year:
+                    student.academic_year = academic_year
+                if year_of_study:
+                    student.year_of_study = year_of_study
+                if semester:
+                    student.semester = semester
+                if section:
+                    student.section = section
+                
+                student.updated_by = request.user
+                student.save()
+                updated_students.append(student)
+                
+            except Student.DoesNotExist:
+                errors.append(f'Student with id {student_id} not found')
+            except Exception as e:
+                errors.append(f'Error updating student {student_id}: {str(e)}')
+        
+        # Serialize updated students
+        serializer = StudentListSerializer(updated_students, many=True)
+        
+        response_data = {
+            'updated_students': serializer.data,
+            'updated_count': len(updated_students),
+            'errors': errors
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['post'])
+    def bulk_assign_by_criteria(self, request):
+        """Bulk assign students based on criteria"""
+        criteria = request.data.get('criteria', {})
+        assignment = request.data.get('assignment', {})
+        
+        if not assignment:
+            return Response(
+                {'error': 'assignment data is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Build filter criteria
+        queryset = Student.objects.filter(status='ACTIVE')
+        
+        # Apply criteria filters
+        if criteria.get('current_department'):
+            queryset = queryset.filter(department_id=criteria['current_department'])
+        if criteria.get('current_academic_program'):
+            queryset = queryset.filter(academic_program_id=criteria['current_academic_program'])
+        if criteria.get('current_academic_year'):
+            queryset = queryset.filter(academic_year=criteria['current_academic_year'])
+        if criteria.get('current_year_of_study'):
+            queryset = queryset.filter(year_of_study=criteria['current_year_of_study'])
+        if criteria.get('current_semester'):
+            queryset = queryset.filter(semester=criteria['current_semester'])
+        if criteria.get('current_section'):
+            queryset = queryset.filter(section=criteria['current_section'])
+        if criteria.get('gender'):
+            queryset = queryset.filter(gender=criteria['gender'])
+        if criteria.get('quota'):
+            queryset = queryset.filter(quota=criteria['quota'])
+        
+        # Validate assignment department if provided
+        if assignment.get('department_id'):
+            try:
+                from academics.models import Department
+                Department.objects.get(id=assignment['department_id'], is_active=True)
+            except Department.DoesNotExist:
+                return Response(
+                    {'error': 'Invalid assignment department'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Validate assignment academic program if provided
+        if assignment.get('academic_program_id'):
+            try:
+                from academics.models import AcademicProgram
+                AcademicProgram.objects.get(id=assignment['academic_program_id'], is_active=True)
+            except AcademicProgram.DoesNotExist:
+                return Response(
+                    {'error': 'Invalid assignment academic program'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Update students
+        update_fields = {}
+        if assignment.get('department_id'):
+            update_fields['department_id'] = assignment['department_id']
+        if assignment.get('academic_program_id'):
+            update_fields['academic_program_id'] = assignment['academic_program_id']
+        if assignment.get('academic_year'):
+            update_fields['academic_year'] = assignment['academic_year']
+        if assignment.get('year_of_study'):
+            update_fields['year_of_study'] = assignment['year_of_study']
+        if assignment.get('semester'):
+            update_fields['semester'] = assignment['semester']
+        if assignment.get('section'):
+            update_fields['section'] = assignment['section']
+        
+        update_fields['updated_by'] = request.user
+        
+        # Perform bulk update
+        updated_count = queryset.update(**update_fields)
+        
+        # Get updated students for response
+        updated_students = queryset.all()[:50]  # Limit response size
+        serializer = StudentListSerializer(updated_students, many=True)
+        
+        response_data = {
+            'updated_count': updated_count,
+            'criteria_matched': queryset.count(),
+            'sample_updated_students': serializer.data,
+            'assignment': assignment
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['get'])
+    def division_statistics(self, request):
+        """Get statistics for student divisions"""
+        from django.db.models import Count
+        from academics.models import Department
+        
+        # Get query parameters for filtering
+        department_id = request.query_params.get('department', None)
+        academic_year = request.query_params.get('academic_year', None)
+        
+        # Base queryset
+        queryset = Student.objects.filter(status='ACTIVE')
+        
+        # Apply filters
+        if department_id:
+            queryset = queryset.filter(department_id=department_id)
+        if academic_year:
+            queryset = queryset.filter(academic_year=academic_year)
+        
+        # Get statistics by department
+        stats = {}
+        departments = Department.objects.filter(is_active=True)
+        
+        for dept in departments:
+            dept_students = queryset.filter(department=dept)
+            if dept_students.exists():
+                # Count by year
+                year_counts = {}
+                years = dept_students.values_list('academic_year', flat=True).distinct()
+                for year in years:
+                    if year:
+                        year_students = dept_students.filter(academic_year=year)
+                        year_counts[year] = {
+                            'total': year_students.count(),
+                            'sections': {}
+                        }
+                        
+                        # Count by section
+                        sections = year_students.values_list('section', flat=True).distinct()
+                        for sec in sections:
+                            if sec:
+                                section_count = year_students.filter(section=sec).count()
+                                year_counts[year]['sections'][sec] = section_count
+                
+                # Count by year of study
+                year_counts = {}
+                for year, _ in Student.YEAR_OF_STUDY_CHOICES:
+                    count = dept_students.filter(year_of_study=year).count()
+                    if count > 0:
+                        year_counts[year] = count
+                
+                # Count by semester
+                semester_counts = {}
+                for semester, _ in Student.SEMESTER_CHOICES:
+                    count = dept_students.filter(semester=semester).count()
+                    if count > 0:
+                        semester_counts[semester] = count
+                
+                # Count by gender
+                gender_counts = {}
+                for gender, _ in Student.GENDER_CHOICES:
+                    count = dept_students.filter(gender=gender).count()
+                    if count > 0:
+                        gender_counts[gender] = count
+                
+                stats[dept.code] = {
+                    'department_id': dept.id,
+                    'department_name': dept.name,
+                    'department_code': dept.code,
+                    'total_students': dept_students.count(),
+                    'by_year': year_counts,
+                    'by_year_of_study': year_counts,
+                    'by_semester': semester_counts,
+                    'by_gender': gender_counts
+                }
+        
+        return Response(stats)
 
 
 class StudentEnrollmentHistoryViewSet(viewsets.ModelViewSet):

@@ -20,4 +20,10 @@ urlpatterns = [
     path('dashboard/', views.student_dashboard, name='dashboard'),
     path('list/', views.student_list_view, name='list'),
     path('detail/<uuid:student_id>/', views.student_detail_view, name='detail'),
+    
+    # Student division and assignment routes
+    path('api/students/divisions/', views.StudentViewSet.as_view({'get': 'divisions'}), name='student-divisions'),
+    path('api/students/assign/', views.StudentViewSet.as_view({'post': 'assign_students'}), name='assign-students'),
+    path('api/students/bulk-assign/', views.StudentViewSet.as_view({'post': 'bulk_assign_by_criteria'}), name='bulk-assign-students'),
+    path('api/students/division-statistics/', views.StudentViewSet.as_view({'get': 'division_statistics'}), name='division-statistics'),
 ]

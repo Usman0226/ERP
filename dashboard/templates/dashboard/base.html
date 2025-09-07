@@ -454,6 +454,13 @@
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link {% if 'assignments' in request.resolver_match.url_name %}active{% endif %}" 
+                               href="{% url 'dashboard:assignments_dashboard' %}">
+                                <i class="fas fa-tasks"></i> Assignments
+                                <span class="badge bg-success ms-2" style="font-size: 0.6rem;">NEW</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link {% if 'enrollment' in request.resolver_match.url_name %}active{% endif %}" 
                                href="{% url 'dashboard:enrollment_dashboard' %}">
                                 <i class="fas fa-user-graduate"></i> Enrollment
@@ -569,6 +576,12 @@
                             <a class="nav-link {% if 'simple_api_workspace' in request.resolver_match.url_name %}active{% endif %}" 
                                href="{% url 'dashboard:simple_api_workspace' %}">
                                 <i class="fas fa-rocket"></i> Quick API Test
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{% url 'docs:home' %}" target="_blank">
+                                <i class="fas fa-book-open"></i> Documentation
+                                <span class="badge bg-success ms-2">NEW</span>
                             </a>
                         </li>
                         <li class="nav-item mt-3">

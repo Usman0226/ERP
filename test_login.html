@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Login</title>
+</head>
+<body>
+    <h1>Test Login Form</h1>
+    <form method="post" action="http://127.0.0.1:8000/dashboard/login/">
+        <input type="hidden" name="csrfmiddlewaretoken" value="test">
+        <label>Email:</label>
+        <input type="email" name="username" value="admin@gmail.com" required><br><br>
+        <label>Password:</label>
+        <input type="password" name="password" value="123456" required><br><br>
+        <button type="submit">Login</button>
+    </form>
+</body>
+</html>

@@ -219,3 +219,61 @@ Your CampsHub360 application is now ready for production with 20k+ users per sec
 ---
 
 **Total deployment time: 5-10 minutes with automatic setup!** 🚀
+
+## 🔧 Gunicorn Production Setup
+
+This project includes a hardened Gunicorn setup for high concurrency and security.
+
+- Config file: `gunicorn.conf.py`
+- Startup script: `run-gunicorn.sh`
+
+### Run locally (production-like)
+```bash
+export DEBUG=False
+./run-gunicorn.sh
+```
+
+### Key secure defaults
+- `preload_app = True` for faster forks and lower memory
+- `worker_class = gevent` with `worker_connections=1000` for high RPS
+- Request limits: `limit_request_line`, `limit_request_fields`, `limit_request_field_size`
+- Graceful lifecycles: `timeout`, `graceful_timeout`, `keepalive`, `max_requests(_jitter)`
+
+### Environment overrides
+Set via environment variables (example):
+```bash
+GUNICORN_WORKERS=4 GUNICORN_TIMEOUT=60 GUNICORN_LOGLEVEL=info ./run-gunicorn.sh
+```
+
+## 📈 ECS Autoscaling
+
+Autoscaling policies are provided at `infra/ecs-autoscaling.json` for CPU and memory targets.
+
+Apply with AWS CLI:
+```bash
+aws application-autoscaling register-scalable-target \
+  --service-namespace ecs \
+  --resource-id service/campushub-cluster/campushub-service \
+  --scalable-dimension ecs:service:DesiredCount \
+  --min-capacity 2 --max-capacity 10
+
+aws application-autoscaling put-scaling-policy \
+  --service-namespace ecs \
+  --resource-id service/campushub-cluster/campushub-service \
+  --scalable-dimension ecs:service:DesiredCount \
+  --policy-name cpu-target-tracking \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-scaling-policy-configuration \
+    file://<(jq -r '.policies[] | select(.policyName=="cpu-target-tracking").targetTrackingScalingPolicyConfiguration' infra/ecs-autoscaling.json)
+
+aws application-autoscaling put-scaling-policy \
+  --service-namespace ecs \
+  --resource-id service/campushub-cluster/campushub-service \
+  --scalable-dimension ecs:service:DesiredCount \
+  --policy-name memory-target-tracking \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-scaling-policy-configuration \
+    file://<(jq -r '.policies[] | select(.policyName=="memory-target-tracking").targetTrackingScalingPolicyConfiguration' infra/ecs-autoscaling.json)
+```
+
+Note: The deployment script `deploy-aws.sh` already creates a production-ready stack with ALB + ECS + RDS + Redis. You can swap the container entrypoint to `./run-gunicorn.sh` for zero-touch starts.

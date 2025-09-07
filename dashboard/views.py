@@ -10,6 +10,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from accounts.models import User, Role, Permission, AuthIdentifier, UserSession, AuditLog, FailedLogin
 from students.models import Student, StudentEnrollmentHistory, StudentDocument, CustomField, StudentImport
+from academics.models import Department, AcademicProgram
 from faculty.models import Faculty, FacultySubject, FacultySchedule, FacultyLeave, FacultyPerformance, FacultyDocument, CustomField as FacultyCustomField, CustomFieldValue
 from django.utils import timezone
 from django.db.models import Avg
@@ -39,6 +40,10 @@ from transportation.forms import (
 from django.contrib import messages
 from mentoring.models import Mentorship, Project, Meeting, Feedback
 from feedback.models import Feedback as UnivFeedback, FeedbackCategory as UnivFeedbackCategory, FeedbackTag as UnivFeedbackTag, FeedbackComment as UnivFeedbackComment, FeedbackAttachment as UnivFeedbackAttachment, FeedbackVote as UnivFeedbackVote
+from assignments.models import (
+    Assignment, AssignmentSubmission, AssignmentFile, AssignmentGrade, 
+    AssignmentComment, AssignmentCategory, AssignmentGroup, AssignmentTemplate
+)
 
 # Ensure is_admin is defined before any decorators use it
 def is_admin(user):
@@ -179,50 +184,48 @@ def feedback_item_create(request):
 @user_passes_test(is_admin)
 def dashboard_home(request):
     """Main dashboard view with statistics"""
-    context = {
-        'total_users': User.objects.count(),
-        'total_roles': Role.objects.count(),
-        'total_permissions': Permission.objects.count(),
-        'active_sessions': UserSession.objects.filter(revoked=False).count(),
-        'total_students': Student.objects.count(),
-        'active_students': Student.objects.filter(status='ACTIVE').count(),
-        'total_faculty': Faculty.objects.count(),
-        'active_faculty': Faculty.objects.filter(status='ACTIVE', currently_associated=True).count(),
-        'total_custom_fields': CustomField.objects.filter(is_active=True).count(),
-        'total_faculty_custom_fields': FacultyCustomField.objects.filter(is_active=True).count(),
-        'recent_users': User.objects.order_by('-date_joined')[:10],
-        'recent_logins': AuditLog.objects.filter(action='login').order_by('-created_at')[:10],
-        'recent_students': Student.objects.order_by('-created_at')[:5],
-        'recent_faculty': Faculty.objects.order_by('-created_at')[:5],
-        # Academics statistics
-        'total_courses': Course.objects.count(),
-        'total_syllabi': Syllabus.objects.count(),
-        'total_timetables': Timetable.objects.filter(is_active=True).count(),
-        'total_enrollments': CourseEnrollment.objects.count(),
-        'total_departments': Department.objects.count(),
-        'total_programs': AcademicProgram.objects.count(),
-        'total_sections': CourseSection.objects.count(),
-        # Enrollment statistics
-        'total_enrollment_rules': EnrollmentRule.objects.count(),
-        'total_course_assignments': CourseAssignment.objects.count(),
-        'total_faculty_assignments': FacultyAssignment.objects.count(),
-        'total_enrollment_plans': StudentEnrollmentPlan.objects.count(),
-        'total_enrollment_requests': EnrollmentRequest.objects.count(),
-        'total_waitlist_entries': WaitlistEntry.objects.filter(is_active=True).count(),
-        # Fee Management statistics
-        'total_fee_categories': FeeCategory.objects.filter(is_active=True).count(),
-        'total_fee_structures': FeeStructure.objects.filter(is_active=True).count(),
-        'total_student_fees': StudentFee.objects.count(),
-        'total_payments': Payment.objects.filter(status='COMPLETED').count(),
-        'total_fees_due': StudentFee.objects.aggregate(total=models.Sum('amount_due'))['total'] or 0,
-        'total_fees_paid': StudentFee.objects.aggregate(total=models.Sum('amount_paid'))['total'] or 0,
-        'overdue_fees_count': StudentFee.objects.filter(due_date__lt=timezone.now().date(), status='PENDING').count(),
-        # Feedback statistics
-        'total_feedback': UnivFeedback.objects.count(),
-        'open_feedback': UnivFeedback.objects.filter(status='open').count(),
-        'recent_feedback': UnivFeedback.objects.order_by('-created_at')[:5],
-    }
-    return render(request, 'dashboard/home.html', context)
+    try:
+        # Basic statistics that are most likely to work
+        context = {
+            'total_users': User.objects.count(),
+            'total_students': Student.objects.count(),
+            'total_faculty': Faculty.objects.count(),
+            'total_roles': Role.objects.count(),
+            'total_permissions': Permission.objects.count(),
+            'active_sessions': UserSession.objects.filter(revoked=False).count(),
+            'recent_users': User.objects.order_by('-date_joined')[:10],
+        }
+        
+        # Try to add more statistics if possible
+        try:
+            context.update({
+                'active_students': Student.objects.filter(status='ACTIVE').count(),
+                'active_faculty': Faculty.objects.filter(status='ACTIVE', currently_associated=True).count(),
+                'total_custom_fields': CustomField.objects.filter(is_active=True).count(),
+                'total_faculty_custom_fields': FacultyCustomField.objects.filter(is_active=True).count(),
+                'recent_students': Student.objects.order_by('-created_at')[:5],
+                'recent_faculty': Faculty.objects.order_by('-created_at')[:5],
+            })
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Some dashboard statistics could not be loaded: {str(e)}")
+        
+        return render(request, 'dashboard/home.html', context)
+        
+    except Exception as e:
+        # If there's an error, return a simple dashboard with basic info
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in dashboard_home: {str(e)}")
+        
+        context = {
+            'total_users': User.objects.count(),
+            'total_students': Student.objects.count(),
+            'total_faculty': Faculty.objects.count(),
+            'error_message': 'Some statistics could not be loaded. Please check the logs.',
+        }
+        return render(request, 'dashboard/home.html', context)
 
 
 @login_required
@@ -1238,13 +1241,15 @@ def students_list(request):
     
     students = students.order_by('-created_at')
     
-    # Get grade choices for filter
+    # Get choices for filter
     from students.models import Student
-    grade_choices = Student.GRADE_CHOICES
+    year_choices = Student.YEAR_OF_STUDY_CHOICES
+    semester_choices = Student.SEMESTER_CHOICES
     
     context = {
         'students': students,
-        'grade_choices': grade_choices,
+        'year_choices': year_choices,
+        'semester_choices': semester_choices,
     }
     return render(request, 'dashboard/students.html', context)
 
@@ -4735,3 +4740,1326 @@ def custom_logout(request):
         logout(request)
         messages.success(request, 'You have been successfully logged out.')
     return redirect('dashboard:login')
+
+
+# ==================== ASSIGNMENTS DASHBOARD VIEWS ====================
+
+@login_required
+def assignments_dashboard(request):
+    """Main assignments dashboard"""
+    user = request.user
+    
+    # Get assignments based on user role
+    if hasattr(user, 'faculty_profile'):
+        # Faculty dashboard
+        faculty = user.faculty_profile
+        assignments = Assignment.objects.filter(faculty=faculty).order_by('-created_at')
+        
+        stats = {
+            'total_assignments': assignments.count(),
+            'published_assignments': assignments.filter(status='PUBLISHED').count(),
+            'draft_assignments': assignments.filter(status='DRAFT').count(),
+            'overdue_assignments': assignments.filter(
+                status='PUBLISHED',
+                due_date__lt=timezone.now()
+            ).count(),
+            'total_submissions': AssignmentSubmission.objects.filter(
+                assignment__faculty=faculty
+            ).count(),
+            'graded_submissions': AssignmentSubmission.objects.filter(
+                assignment__faculty=faculty,
+                grade__isnull=False
+            ).count(),
+            'pending_grades': AssignmentSubmission.objects.filter(
+                assignment__faculty=faculty,
+                grade__isnull=True
+            ).count(),
+        }
+        
+        recent_assignments = assignments[:5]
+        recent_submissions = AssignmentSubmission.objects.filter(
+            assignment__faculty=faculty
+        ).order_by('-submission_date')[:5]
+        
+    elif hasattr(user, 'student_profile'):
+        # Student dashboard
+        student = user.student_profile
+        assignments = Assignment.objects.filter(
+            Q(assigned_to_students=student) | 
+            Q(assigned_to_grades__students=student)
+        ).distinct().order_by('-created_at')
+        
+        stats = {
+            'total_assignments': assignments.count(),
+            'submitted_assignments': AssignmentSubmission.objects.filter(student=student).count(),
+            'pending_assignments': assignments.exclude(
+                submissions__student=student
+            ).count(),
+            'late_submissions': AssignmentSubmission.objects.filter(
+                student=student, is_late=True
+            ).count(),
+        }
+        
+        recent_assignments = assignments[:5]
+        my_submissions = AssignmentSubmission.objects.filter(
+            student=student
+        ).order_by('-submission_date')[:5]
+        
+    else:
+        # Admin dashboard
+        assignments = Assignment.objects.all().order_by('-created_at')
+        
+        stats = {
+            'total_assignments': assignments.count(),
+            'published_assignments': assignments.filter(status='PUBLISHED').count(),
+            'draft_assignments': assignments.filter(status='DRAFT').count(),
+            'overdue_assignments': assignments.filter(
+                status='PUBLISHED',
+                due_date__lt=timezone.now()
+            ).count(),
+            'total_submissions': AssignmentSubmission.objects.count(),
+            'graded_submissions': AssignmentSubmission.objects.filter(
+                grade__isnull=False
+            ).count(),
+            'pending_grades': AssignmentSubmission.objects.filter(
+                grade__isnull=True
+            ).count(),
+        }
+        
+        recent_assignments = assignments[:5]
+        recent_submissions = AssignmentSubmission.objects.all().order_by('-submission_date')[:5]
+    
+    context = {
+        'stats': stats,
+        'recent_assignments': recent_assignments,
+        'categories': AssignmentCategory.objects.filter(is_active=True),
+        'user_role': 'faculty' if hasattr(user, 'faculty_profile') else 'student' if hasattr(user, 'student_profile') else 'admin',
+    }
+    
+    if hasattr(user, 'faculty_profile'):
+        context['recent_submissions'] = recent_submissions
+    elif hasattr(user, 'student_profile'):
+        context['my_submissions'] = my_submissions
+    
+    return render(request, 'dashboard/assignments/dashboard.html', context)
+
+
+@login_required
+def assignments_list(request):
+    """List all assignments with filtering"""
+    user = request.user
+    
+    # Get assignments based on user role
+    if hasattr(user, 'faculty_profile'):
+        assignments = Assignment.objects.filter(faculty=user.faculty_profile)
+    elif hasattr(user, 'student_profile'):
+        student = user.student_profile
+        assignments = Assignment.objects.filter(
+            Q(assigned_to_students=student) | 
+            Q(assigned_to_grades__students=student)
+        ).distinct()
+    else:
+        assignments = Assignment.objects.all()
+    
+    # Apply filters
+    search = request.GET.get('search', '')
+    status_filter = request.GET.get('status', '')
+    category_filter = request.GET.get('category', '')
+    is_overdue = request.GET.get('overdue', '')
+    
+    if search:
+        assignments = assignments.filter(
+            Q(title__icontains=search) | 
+            Q(description__icontains=search)
+        )
+    
+    if status_filter:
+        assignments = assignments.filter(status=status_filter)
+    
+    if category_filter:
+        assignments = assignments.filter(category_id=category_filter)
+    
+    if is_overdue == 'true':
+        assignments = assignments.filter(
+            status='PUBLISHED',
+            due_date__lt=timezone.now()
+        )
+    
+    assignments = assignments.order_by('-created_at')
+    
+    context = {
+        'assignments': assignments,
+        'categories': AssignmentCategory.objects.filter(is_active=True),
+        'status_choices': Assignment.STATUS_CHOICES,
+        'filters': {
+            'search': search,
+            'status': status_filter,
+            'category': category_filter,
+            'overdue': is_overdue,
+        }
+    }
+    
+    return render(request, 'dashboard/assignments/list.html', context)
+
+
+@login_required
+def assignment_detail(request, assignment_id):
+    """Assignment detail view"""
+    assignment = get_object_or_404(Assignment, id=assignment_id)
+    user = request.user
+    
+    # Check permissions
+    if hasattr(user, 'student_profile'):
+        student = user.student_profile
+        if not (assignment.assigned_to_students.filter(id=student.id).exists() or 
+                assignment.assigned_to_grades.filter(students=student).exists()):
+            messages.error(request, 'You do not have permission to view this assignment.')
+            return redirect('dashboard:assignments_list')
+    elif hasattr(user, 'faculty_profile'):
+        if assignment.faculty != user.faculty_profile:
+            messages.error(request, 'You do not have permission to view this assignment.')
+            return redirect('dashboard:assignments_list')
+    
+    # Get submissions if user is faculty or admin
+    submissions = None
+    if hasattr(user, 'faculty_profile') or user.is_staff:
+        submissions = AssignmentSubmission.objects.filter(
+            assignment=assignment
+        ).order_by('-submission_date')
+    
+    # Get user's submission if student
+    my_submission = None
+    if hasattr(user, 'student_profile'):
+        my_submission = AssignmentSubmission.objects.filter(
+            assignment=assignment,
+            student=user.student_profile
+        ).first()
+    
+    # Get comments
+    comments = AssignmentComment.objects.filter(
+        assignment=assignment,
+        parent_comment__isnull=True
+    ).order_by('created_at')
+    
+    context = {
+        'assignment': assignment,
+        'submissions': submissions,
+        'my_submission': my_submission,
+        'comments': comments,
+        'can_edit': hasattr(user, 'faculty_profile') and assignment.faculty == user.faculty_profile,
+        'can_submit': hasattr(user, 'student_profile') and not my_submission,
+        'can_grade': hasattr(user, 'faculty_profile') and assignment.faculty == user.faculty_profile,
+    }
+    
+    return render(request, 'dashboard/assignments/detail.html', context)
+
+
+@login_required
+def assignment_create(request):
+    """Create new assignment"""
+    if not hasattr(request.user, 'faculty_profile'):
+        messages.error(request, 'Only faculty can create assignments.')
+        return redirect('dashboard:assignments_list')
+    
+    if request.method == 'POST':
+        # Handle form submission
+        title = request.POST.get('title', '').strip()
+        description = request.POST.get('description', '').strip()
+        instructions = request.POST.get('instructions', '').strip()
+        max_marks = request.POST.get('max_marks', '')
+        due_date = request.POST.get('due_date', '')
+        category_id = request.POST.get('category', '')
+        is_group_assignment = request.POST.get('is_group_assignment') == 'on'
+        max_group_size = request.POST.get('max_group_size', '1')
+        late_submission_allowed = request.POST.get('late_submission_allowed') == 'on'
+        
+        # Validation
+        if not title or not description or not max_marks or not due_date:
+            messages.error(request, 'Please fill in all required fields.')
+        else:
+            try:
+                assignment = Assignment.objects.create(
+                    title=title,
+                    description=description,
+                    instructions=instructions,
+                    max_marks=float(max_marks),
+                    due_date=timezone.datetime.fromisoformat(due_date.replace('Z', '+00:00')),
+                    category_id=category_id if category_id else None,
+                    faculty=request.user.faculty_profile,
+                    is_group_assignment=is_group_assignment,
+                    max_group_size=int(max_group_size) if max_group_size else 1,
+                    late_submission_allowed=late_submission_allowed,
+                    status='DRAFT'
+                )
+                
+                # Handle assigned programs, departments, course sections, and students
+                assigned_programs = request.POST.getlist('assigned_programs')
+                assigned_departments = request.POST.getlist('assigned_departments')
+                assigned_course_sections = request.POST.getlist('assigned_course_sections')
+                assigned_students = request.POST.getlist('assigned_students')
+                
+                if assigned_programs:
+                    assignment.assigned_to_programs.set(assigned_programs)
+                if assigned_departments:
+                    assignment.assigned_to_departments.set(assigned_departments)
+                if assigned_course_sections:
+                    assignment.assigned_to_course_sections.set(assigned_course_sections)
+                if assigned_students:
+                    assignment.assigned_to_students.set(assigned_students)
+                
+                messages.success(request, 'Assignment created successfully.')
+                return redirect('dashboard:assignment_detail', assignment_id=assignment.id)
+                
+            except Exception as e:
+                messages.error(request, f'Error creating assignment: {str(e)}')
+    
+    context = {
+        'categories': AssignmentCategory.objects.filter(is_active=True),
+        'programs': apps.get_model('academics', 'AcademicProgram').objects.filter(is_active=True) if apps.is_installed('academics') else [],
+        'departments': apps.get_model('academics', 'Department').objects.filter(is_active=True) if apps.is_installed('academics') else [],
+        'course_sections': apps.get_model('academics', 'CourseSection').objects.filter(is_active=True) if apps.is_installed('academics') else [],
+        'students': Student.objects.all()[:100],  # Limit for performance
+    }
+    
+    return render(request, 'dashboard/assignments/create.html', context)
+
+
+@login_required
+def assignment_edit(request, assignment_id):
+    """Edit assignment"""
+    assignment = get_object_or_404(Assignment, id=assignment_id)
+    
+    if not hasattr(request.user, 'faculty_profile') or assignment.faculty != request.user.faculty_profile:
+        messages.error(request, 'You do not have permission to edit this assignment.')
+        return redirect('dashboard:assignments_list')
+    
+    if request.method == 'POST':
+        # Handle form submission
+        assignment.title = request.POST.get('title', '').strip()
+        assignment.description = request.POST.get('description', '').strip()
+        assignment.instructions = request.POST.get('instructions', '').strip()
+        assignment.max_marks = float(request.POST.get('max_marks', '0'))
+        assignment.due_date = timezone.datetime.fromisoformat(
+            request.POST.get('due_date', '').replace('Z', '+00:00')
+        )
+        assignment.category_id = request.POST.get('category') or None
+        assignment.is_group_assignment = request.POST.get('is_group_assignment') == 'on'
+        assignment.max_group_size = int(request.POST.get('max_group_size', '1'))
+        assignment.late_submission_allowed = request.POST.get('late_submission_allowed') == 'on'
+        
+        # Handle assigned programs, departments, course sections, and students
+        assigned_programs = request.POST.getlist('assigned_programs')
+        assigned_departments = request.POST.getlist('assigned_departments')
+        assigned_course_sections = request.POST.getlist('assigned_course_sections')
+        assigned_students = request.POST.getlist('assigned_students')
+        
+        assignment.save()
+        
+        if assigned_programs:
+            assignment.assigned_to_programs.set(assigned_programs)
+        if assigned_departments:
+            assignment.assigned_to_departments.set(assigned_departments)
+        if assigned_course_sections:
+            assignment.assigned_to_course_sections.set(assigned_course_sections)
+        if assigned_students:
+            assignment.assigned_to_students.set(assigned_students)
+        
+        messages.success(request, 'Assignment updated successfully.')
+        return redirect('dashboard:assignment_detail', assignment_id=assignment.id)
+    
+    context = {
+        'assignment': assignment,
+        'categories': AssignmentCategory.objects.filter(is_active=True),
+        'programs': apps.get_model('academics', 'AcademicProgram').objects.filter(is_active=True) if apps.is_installed('academics') else [],
+        'departments': apps.get_model('academics', 'Department').objects.filter(is_active=True) if apps.is_installed('academics') else [],
+        'course_sections': apps.get_model('academics', 'CourseSection').objects.filter(is_active=True) if apps.is_installed('academics') else [],
+        'students': Student.objects.all()[:100],
+    }
+    
+    return render(request, 'dashboard/assignments/edit.html', context)
+
+
+@login_required
+def assignment_submit(request, assignment_id):
+    """Submit assignment"""
+    assignment = get_object_or_404(Assignment, id=assignment_id)
+    
+    if not hasattr(request.user, 'student_profile'):
+        messages.error(request, 'Only students can submit assignments.')
+        return redirect('dashboard:assignments_list')
+    
+    student = request.user.student_profile
+    
+    # Check if assignment is assigned to student
+    if not (assignment.assigned_to_students.filter(id=student.id).exists() or 
+            assignment.assigned_to_grades.filter(students=student).exists()):
+        messages.error(request, 'This assignment is not assigned to you.')
+        return redirect('dashboard:assignments_list')
+    
+    # Check if already submitted
+    existing_submission = AssignmentSubmission.objects.filter(
+        assignment=assignment,
+        student=student
+    ).first()
+    
+    if existing_submission:
+        messages.error(request, 'You have already submitted this assignment.')
+        return redirect('dashboard:assignment_detail', assignment_id=assignment.id)
+    
+    if request.method == 'POST':
+        content = request.POST.get('content', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        
+        if not content:
+            messages.error(request, 'Please provide your submission content.')
+        else:
+            try:
+                submission = AssignmentSubmission.objects.create(
+                    assignment=assignment,
+                    student=student,
+                    content=content,
+                    notes=notes,
+                    status='SUBMITTED'
+                )
+                
+                messages.success(request, 'Assignment submitted successfully.')
+                return redirect('dashboard:assignment_detail', assignment_id=assignment.id)
+                
+            except Exception as e:
+                messages.error(request, f'Error submitting assignment: {str(e)}')
+    
+    return render(request, 'dashboard/assignments/submit.html', {'assignment': assignment})
+
+
+@login_required
+def assignment_grade(request, submission_id):
+    """Grade assignment submission"""
+    submission = get_object_or_404(AssignmentSubmission, id=submission_id)
+    
+    if not hasattr(request.user, 'faculty_profile') or submission.assignment.faculty != request.user.faculty_profile:
+        messages.error(request, 'You do not have permission to grade this submission.')
+        return redirect('dashboard:assignments_list')
+    
+    if request.method == 'POST':
+        marks_obtained = request.POST.get('marks_obtained', '')
+        grade_letter = request.POST.get('grade_letter', '')
+        feedback = request.POST.get('feedback', '').strip()
+        
+        if not marks_obtained:
+            messages.error(request, 'Please provide marks obtained.')
+        else:
+            try:
+                # Create or update grade
+                grade, created = AssignmentGrade.objects.get_or_create(
+                    submission=submission,
+                    defaults={
+                        'marks_obtained': float(marks_obtained),
+                        'grade_letter': grade_letter if grade_letter else None,
+                        'feedback': feedback,
+                        'graded_by': request.user
+                    }
+                )
+                
+                if not created:
+                    grade.marks_obtained = float(marks_obtained)
+                    grade.grade_letter = grade_letter if grade_letter else None
+                    grade.feedback = feedback
+                    grade.graded_by = request.user
+                    grade.save()
+                
+                # Update submission
+                submission.grade = grade
+                submission.graded_by = request.user
+                submission.graded_at = timezone.now()
+                submission.feedback = feedback
+                submission.save()
+                
+                messages.success(request, 'Assignment graded successfully.')
+                return redirect('dashboard:assignment_detail', assignment_id=submission.assignment.id)
+                
+            except Exception as e:
+                messages.error(request, f'Error grading assignment: {str(e)}')
+    
+    context = {
+        'submission': submission,
+        'grade_choices': AssignmentGrade.GRADE_LETTER_CHOICES,
+    }
+    
+    return render(request, 'dashboard/assignments/grade.html', context)
+
+
+@login_required
+def assignment_categories(request):
+    """Manage assignment categories"""
+    if not request.user.is_staff:
+        messages.error(request, 'Only administrators can manage categories.')
+        return redirect('dashboard:assignments_dashboard')
+    
+    categories = AssignmentCategory.objects.all().order_by('name')
+    
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        
+        if action == 'create':
+            name = request.POST.get('name', '').strip()
+            description = request.POST.get('description', '').strip()
+            color_code = request.POST.get('color_code', '#007bff')
+            
+            if name:
+                try:
+                    AssignmentCategory.objects.create(
+                        name=name,
+                        description=description,
+                        color_code=color_code
+                    )
+                    messages.success(request, 'Category created successfully.')
+                except Exception as e:
+                    messages.error(request, f'Error creating category: {str(e)}')
+            else:
+                messages.error(request, 'Category name is required.')
+        
+        elif action == 'update':
+            category_id = request.POST.get('category_id')
+            category = get_object_or_404(AssignmentCategory, id=category_id)
+            
+            category.name = request.POST.get('name', '').strip()
+            category.description = request.POST.get('description', '').strip()
+            category.color_code = request.POST.get('color_code', '#007bff')
+            category.is_active = request.POST.get('is_active') == 'on'
+            
+            try:
+                category.save()
+                messages.success(request, 'Category updated successfully.')
+            except Exception as e:
+                messages.error(request, f'Error updating category: {str(e)}')
+        
+        elif action == 'delete':
+            category_id = request.POST.get('category_id')
+            category = get_object_or_404(AssignmentCategory, id=category_id)
+            
+            try:
+                category.delete()
+                messages.success(request, 'Category deleted successfully.')
+            except Exception as e:
+                messages.error(request, f'Error deleting category: {str(e)}')
+        
+        return redirect('dashboard:assignment_categories')
+    
+    return render(request, 'dashboard/assignments/categories.html', {'categories': categories})
+
+
+@login_required
+def assignment_templates(request):
+    """Manage assignment templates"""
+    if not hasattr(request.user, 'faculty_profile') and not request.user.is_staff:
+        messages.error(request, 'Only faculty can manage templates.')
+        return redirect('dashboard:assignments_dashboard')
+    
+    # Get templates accessible to user
+    if request.user.is_staff:
+        templates = AssignmentTemplate.objects.all()
+    else:
+        templates = AssignmentTemplate.objects.filter(
+            Q(is_public=True) | Q(created_by=request.user)
+        )
+    
+    templates = templates.order_by('-created_at')
+    
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        
+        if action == 'create':
+            name = request.POST.get('name', '').strip()
+            description = request.POST.get('description', '').strip()
+            instructions = request.POST.get('instructions', '').strip()
+            max_marks = request.POST.get('max_marks', '')
+            category_id = request.POST.get('category', '')
+            is_group_assignment = request.POST.get('is_group_assignment') == 'on'
+            max_group_size = request.POST.get('max_group_size', '1')
+            is_public = request.POST.get('is_public') == 'on'
+            
+            if name and max_marks:
+                try:
+                    AssignmentTemplate.objects.create(
+                        name=name,
+                        description=description,
+                        instructions=instructions,
+                        max_marks=float(max_marks),
+                        category_id=category_id if category_id else None,
+                        is_group_assignment=is_group_assignment,
+                        max_group_size=int(max_group_size) if max_group_size else 1,
+                        is_public=is_public,
+                        created_by=request.user
+                    )
+                    messages.success(request, 'Template created successfully.')
+                except Exception as e:
+                    messages.error(request, f'Error creating template: {str(e)}')
+            else:
+                messages.error(request, 'Template name and max marks are required.')
+        
+        return redirect('dashboard:assignment_templates')
+    
+    context = {
+        'templates': templates,
+        'categories': AssignmentCategory.objects.filter(is_active=True),
+    }
+    
+    return render(request, 'dashboard/assignments/templates.html', context)
+
+
+@login_required
+def assignment_statistics(request):
+    """Assignment statistics and analytics"""
+    user = request.user
+    
+    if hasattr(user, 'faculty_profile'):
+        # Faculty statistics
+        faculty = user.faculty_profile
+        assignments = Assignment.objects.filter(faculty=faculty)
+        submissions = AssignmentSubmission.objects.filter(assignment__faculty=faculty)
+        
+        stats = {
+            'total_assignments': assignments.count(),
+            'published_assignments': assignments.filter(status='PUBLISHED').count(),
+            'draft_assignments': assignments.filter(status='DRAFT').count(),
+            'overdue_assignments': assignments.filter(
+                status='PUBLISHED',
+                due_date__lt=timezone.now()
+            ).count(),
+            'total_submissions': submissions.count(),
+            'graded_submissions': submissions.filter(grade__isnull=False).count(),
+            'pending_grades': submissions.filter(grade__isnull=True).count(),
+            'average_grade': submissions.filter(grade__isnull=False).aggregate(
+                avg=Avg('grade__marks_obtained')
+            )['avg'] or 0,
+        }
+        
+    elif hasattr(user, 'student_profile'):
+        # Student statistics
+        student = user.student_profile
+        submissions = AssignmentSubmission.objects.filter(student=student)
+        
+        stats = {
+            'total_assignments': Assignment.objects.filter(
+                Q(assigned_to_students=student) | 
+                Q(assigned_to_grades__students=student)
+            ).distinct().count(),
+            'submitted_assignments': submissions.count(),
+            'pending_assignments': Assignment.objects.filter(
+                Q(assigned_to_students=student) | 
+                Q(assigned_to_grades__students=student)
+            ).exclude(submissions__student=student).distinct().count(),
+            'late_submissions': submissions.filter(is_late=True).count(),
+            'average_grade': submissions.filter(grade__isnull=False).aggregate(
+                avg=Avg('grade__marks_obtained')
+            )['avg'] or 0,
+        }
+        
+    else:
+        # Admin statistics
+        stats = {
+            'total_assignments': Assignment.objects.count(),
+            'published_assignments': Assignment.objects.filter(status='PUBLISHED').count(),
+            'draft_assignments': Assignment.objects.filter(status='DRAFT').count(),
+            'overdue_assignments': Assignment.objects.filter(
+                status='PUBLISHED',
+                due_date__lt=timezone.now()
+            ).count(),
+            'total_submissions': AssignmentSubmission.objects.count(),
+            'graded_submissions': AssignmentSubmission.objects.filter(grade__isnull=False).count(),
+            'pending_grades': AssignmentSubmission.objects.filter(grade__isnull=True).count(),
+            'average_grade': AssignmentSubmission.objects.filter(grade__isnull=False).aggregate(
+                avg=Avg('grade__marks_obtained')
+            )['avg'] or 0,
+        }
+    
+    return render(request, 'dashboard/assignments/statistics.html', {'stats': stats})
+
+
+# ==================== AJAX AND FILE UPLOAD HANDLERS ====================
+
+@login_required
+def assignment_file_upload(request):
+    """Handle file uploads for assignments"""
+    if request.method == 'POST':
+        try:
+            assignment_id = request.POST.get('assignment_id')
+            file = request.FILES.get('file')
+            description = request.POST.get('description', '')
+            
+            if not assignment_id or not file:
+                return JsonResponse({'success': False, 'error': 'Missing required fields'})
+            
+            assignment = get_object_or_404(Assignment, id=assignment_id)
+            
+            # Check permissions
+            if hasattr(request.user, 'faculty_profile') and assignment.faculty != request.user.faculty_profile:
+                return JsonResponse({'success': False, 'error': 'Permission denied'})
+            
+            # Create file record
+            assignment_file = AssignmentFile.objects.create(
+                assignment=assignment,
+                file_name=file.name,
+                file_path=file,
+                file_type='ASSIGNMENT',
+                uploaded_by=request.user,
+                description=description
+            )
+            
+            return JsonResponse({
+                'success': True,
+                'file_id': str(assignment_file.id),
+                'file_name': assignment_file.file_name,
+                'file_url': assignment_file.file_path.url,
+                'file_size': assignment_file.file_size
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def assignment_publish_ajax(request, assignment_id):
+    """AJAX endpoint to publish an assignment"""
+    if request.method == 'POST':
+        try:
+            assignment = get_object_or_404(Assignment, id=assignment_id)
+            
+            if not hasattr(request.user, 'faculty_profile') or assignment.faculty != request.user.faculty_profile:
+                return JsonResponse({'success': False, 'error': 'Permission denied'})
+            
+            if assignment.status != 'DRAFT':
+                return JsonResponse({'success': False, 'error': 'Only draft assignments can be published'})
+            
+            assignment.status = 'PUBLISHED'
+            assignment.save()
+            
+            return JsonResponse({'success': True, 'message': 'Assignment published successfully'})
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def assignment_close_ajax(request, assignment_id):
+    """AJAX endpoint to close an assignment"""
+    if request.method == 'POST':
+        try:
+            assignment = get_object_or_404(Assignment, id=assignment_id)
+            
+            if not hasattr(request.user, 'faculty_profile') or assignment.faculty != request.user.faculty_profile:
+                return JsonResponse({'success': False, 'error': 'Permission denied'})
+            
+            if assignment.status not in ['PUBLISHED', 'DRAFT']:
+                return JsonResponse({'success': False, 'error': 'Only published or draft assignments can be closed'})
+            
+            assignment.status = 'CLOSED'
+            assignment.save()
+            
+            return JsonResponse({'success': True, 'message': 'Assignment closed successfully'})
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def assignment_comment_ajax(request, assignment_id):
+    """AJAX endpoint to add comments to assignments"""
+    if request.method == 'POST':
+        try:
+            assignment = get_object_or_404(Assignment, id=assignment_id)
+            content = request.POST.get('content', '').strip()
+            comment_type = request.POST.get('comment_type', 'GENERAL')
+            
+            if not content:
+                return JsonResponse({'success': False, 'error': 'Comment content is required'})
+            
+            comment = AssignmentComment.objects.create(
+                assignment=assignment,
+                author=request.user,
+                content=content,
+                comment_type=comment_type
+            )
+            
+            return JsonResponse({
+                'success': True,
+                'comment_id': str(comment.id),
+                'author': request.user.email,
+                'content': comment.content,
+                'comment_type': comment.get_comment_type_display(),
+                'created_at': comment.created_at.strftime('%M %d, %Y %H:%i')
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def assignment_stats_ajax(request):
+    """AJAX endpoint to get assignment statistics"""
+    try:
+        user = request.user
+        
+        if hasattr(user, 'faculty_profile'):
+            faculty = user.faculty_profile
+            assignments = Assignment.objects.filter(faculty=faculty)
+            submissions = AssignmentSubmission.objects.filter(assignment__faculty=faculty)
+            
+            stats = {
+                'total_assignments': assignments.count(),
+                'published_assignments': assignments.filter(status='PUBLISHED').count(),
+                'draft_assignments': assignments.filter(status='DRAFT').count(),
+                'overdue_assignments': assignments.filter(
+                    status='PUBLISHED',
+                    due_date__lt=timezone.now()
+                ).count(),
+                'total_submissions': submissions.count(),
+                'graded_submissions': submissions.filter(grade__isnull=False).count(),
+                'pending_grades': submissions.filter(grade__isnull=True).count(),
+                'average_grade': submissions.filter(grade__isnull=False).aggregate(
+                    avg=Avg('grade__marks_obtained')
+                )['avg'] or 0,
+            }
+            
+        elif hasattr(user, 'student_profile'):
+            student = user.student_profile
+            submissions = AssignmentSubmission.objects.filter(student=student)
+            
+            stats = {
+                'total_assignments': Assignment.objects.filter(
+                    Q(assigned_to_students=student) | 
+                    Q(assigned_to_grades__students=student)
+                ).distinct().count(),
+                'submitted_assignments': submissions.count(),
+                'pending_assignments': Assignment.objects.filter(
+                    Q(assigned_to_students=student) | 
+                    Q(assigned_to_grades__students=student)
+                ).exclude(submissions__student=student).distinct().count(),
+                'late_submissions': submissions.filter(is_late=True).count(),
+                'average_grade': submissions.filter(grade__isnull=False).aggregate(
+                    avg=Avg('grade__marks_obtained')
+                )['avg'] or 0,
+            }
+            
+        else:
+            stats = {
+                'total_assignments': Assignment.objects.count(),
+                'published_assignments': Assignment.objects.filter(status='PUBLISHED').count(),
+                'draft_assignments': Assignment.objects.filter(status='DRAFT').count(),
+                'overdue_assignments': Assignment.objects.filter(
+                    status='PUBLISHED',
+                    due_date__lt=timezone.now()
+                ).count(),
+                'total_submissions': AssignmentSubmission.objects.count(),
+                'graded_submissions': AssignmentSubmission.objects.filter(grade__isnull=False).count(),
+                'pending_grades': AssignmentSubmission.objects.filter(grade__isnull=True).count(),
+                'average_grade': AssignmentSubmission.objects.filter(grade__isnull=False).aggregate(
+                    avg=Avg('grade__marks_obtained')
+                )['avg'] or 0,
+            }
+        
+        return JsonResponse({'success': True, 'stats': stats})
+        
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def assignment_autocomplete(request):
+    """AJAX endpoint for assignment autocomplete"""
+    query = request.GET.get('q', '').strip()
+    
+    if not query or len(query) < 2:
+        return JsonResponse({'results': []})
+    
+    user = request.user
+    
+    if hasattr(user, 'faculty_profile'):
+        assignments = Assignment.objects.filter(
+            faculty=user.faculty_profile,
+            title__icontains=query
+        )[:10]
+    elif hasattr(user, 'student_profile'):
+        student = user.student_profile
+        assignments = Assignment.objects.filter(
+            Q(assigned_to_students=student) | 
+            Q(assigned_to_grades__students=student),
+            title__icontains=query
+        ).distinct()[:10]
+    else:
+        assignments = Assignment.objects.filter(title__icontains=query)[:10]
+    
+    results = []
+    for assignment in assignments:
+        results.append({
+            'id': str(assignment.id),
+            'title': assignment.title,
+            'faculty': assignment.faculty.name,
+            'due_date': assignment.due_date.strftime('%M %d, %Y'),
+            'status': assignment.get_status_display()
+        })
+    
+    return JsonResponse({'results': results})
+
+
+@login_required
+def assignment_bulk_action(request):
+    """AJAX endpoint for bulk actions on assignments"""
+    if request.method == 'POST':
+        try:
+            action = request.POST.get('action')
+            assignment_ids = request.POST.get('assignment_ids', '').split(',')
+            
+            if not action or not assignment_ids:
+                return JsonResponse({'success': False, 'error': 'Missing required parameters'})
+            
+            user = request.user
+            
+            if not hasattr(user, 'faculty_profile'):
+                return JsonResponse({'success': False, 'error': 'Permission denied'})
+            
+            assignments = Assignment.objects.filter(
+                id__in=assignment_ids,
+                faculty=user.faculty_profile
+            )
+            
+            if action == 'publish':
+                assignments.filter(status='DRAFT').update(status='PUBLISHED')
+                message = f'{assignments.filter(status="PUBLISHED").count()} assignments published'
+            elif action == 'close':
+                assignments.filter(status__in=['PUBLISHED', 'DRAFT']).update(status='CLOSED')
+                message = f'{assignments.filter(status="CLOSED").count()} assignments closed'
+            elif action == 'delete':
+                count = assignments.count()
+                assignments.delete()
+                message = f'{count} assignments deleted'
+            else:
+                return JsonResponse({'success': False, 'error': 'Invalid action'})
+            
+            return JsonResponse({'success': True, 'message': message})
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def filter_students_ajax(request):
+    """AJAX endpoint to filter students based on department, year, and section"""
+    if request.method == 'GET':
+        department_id = request.GET.get('department_id')
+        academic_year = request.GET.get('academic_year')
+        semester = request.GET.get('semester')
+        course_section_id = request.GET.get('course_section_id')
+        
+        try:
+            # Start with all students
+            students = Student.objects.all()
+            
+            # Filter by department (through course enrollments)
+            if department_id:
+                from academics.models import CourseEnrollment
+                student_ids = CourseEnrollment.objects.filter(
+                    course_section__course__department_id=department_id,
+                    status='ENROLLED'
+                ).values_list('student_id', flat=True)
+                students = students.filter(id__in=student_ids)
+            
+            # Filter by academic year
+            if academic_year:
+                students = students.filter(academic_year=academic_year)
+            
+            # Filter by course section
+            if course_section_id:
+                from academics.models import CourseEnrollment
+                student_ids = CourseEnrollment.objects.filter(
+                    course_section_id=course_section_id,
+                    status='ENROLLED'
+                ).values_list('student_id', flat=True)
+                students = students.filter(id__in=student_ids)
+            
+            # Limit results for performance
+            students = students[:100]
+            
+            # Format response
+            student_data = []
+            for student in students:
+                student_data.append({
+                    'id': str(student.id),
+                    'name': f"{student.first_name} {student.last_name}",
+                    'roll_number': student.roll_number,
+                    'academic_year': student.academic_year or '',
+                    'section': student.section or '',
+                    'grade_level': student.grade_level
+                })
+            
+            return JsonResponse({
+                'success': True,
+                'students': student_data,
+                'count': len(student_data)
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'message': str(e)})
+    
+    return JsonResponse({'success': False, 'message': 'Invalid request method'})
+
+
+from django.contrib.auth.views import LoginView
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+
+class CustomLoginView(LoginView):
+    """Custom login view that handles email-based authentication"""
+    template_name = 'dashboard/login.html'
+    redirect_authenticated_user = True
+    
+    def get_success_url(self):
+        return '/dashboard/'
+    
+    def form_valid(self, form):
+        """Override to add custom success message"""
+        from django.contrib import messages
+        messages.success(self.request, f'Welcome back, {form.get_user().email}!')
+        return super().form_valid(form)
+    
+    def form_invalid(self, form):
+        """Override to add custom error message"""
+        from django.contrib import messages
+        messages.error(self.request, 'Invalid email or password.')
+        return super().form_invalid(form)
+
+@csrf_exempt
+def custom_login(request):
+    """Simple login view for testing"""
+    from django.contrib.auth import authenticate, login
+    from django.contrib import messages
+    from django.shortcuts import render, redirect
+    
+    if request.method == 'POST':
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        
+        if username and password:
+            user = authenticate(request, username=username, password=password)
+            if user is not None:
+                if user.is_active:
+                    login(request, user)
+                    messages.success(request, f'Welcome back, {user.email}!')
+                    return redirect('dashboard:home')
+                else:
+                    messages.error(request, 'Your account is disabled.')
+            else:
+                messages.error(request, 'Invalid email or password.')
+        else:
+            messages.error(request, 'Please enter both email and password.')
+    
+    # For GET requests, show the login form
+    from django.contrib.auth.forms import AuthenticationForm
+    form = AuthenticationForm()
+    return render(request, 'dashboard/login.html', {'form': form})
+
+
+# Student Division Management Views
+@login_required
+@user_passes_test(is_admin)
+def student_divisions(request):
+    """Student division management dashboard"""
+    # Get filter parameters
+    department_id = request.GET.get('department')
+    academic_program_id = request.GET.get('academic_program')
+    academic_year = request.GET.get('academic_year')
+    year_of_study = request.GET.get('year_of_study')
+    semester = request.GET.get('semester')
+    section = request.GET.get('section')
+    
+    # Get all departments and programs for filters
+    departments = Department.objects.filter(is_active=True).order_by('name')
+    programs = AcademicProgram.objects.filter(is_active=True).order_by('name')
+    
+    # Get students with filters
+    students = Student.objects.filter(status='ACTIVE')
+    
+    if department_id:
+        students = students.filter(department_id=department_id)
+    if academic_program_id:
+        students = students.filter(academic_program_id=academic_program_id)
+    if academic_year:
+        students = students.filter(academic_year=academic_year)
+    if year_of_study:
+        students = students.filter(year_of_study=year_of_study)
+    if semester:
+        students = students.filter(semester=semester)
+    if section:
+        students = students.filter(section=section)
+    
+    # Group students by division
+    divisions = {}
+    for student in students:
+        dept_code = student.department.code if student.department else 'No Department'
+        program_code = student.academic_program.code if student.academic_program else 'No Program'
+        
+        if dept_code not in divisions:
+            divisions[dept_code] = {
+                'department': student.department,
+                'programs': {}
+            }
+        
+        if program_code not in divisions[dept_code]['programs']:
+            divisions[dept_code]['programs'][program_code] = {
+                'program': student.academic_program,
+                'years': {}
+            }
+        
+        year_key = f"{student.academic_year or 'No Year'}"
+        if year_key not in divisions[dept_code]['programs'][program_code]['years']:
+            divisions[dept_code]['programs'][program_code]['years'][year_key] = {
+                'academic_year': student.academic_year,
+                'year_of_study': {},
+                'total_students': 0
+            }
+        
+        study_year = student.year_of_study or 'No Year'
+        if study_year not in divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study']:
+            divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year] = {
+                'semesters': {},
+                'total_students': 0
+            }
+        
+        sem = student.semester or 'No Semester'
+        if sem not in divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year]['semesters']:
+            divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year]['semesters'][sem] = {
+                'sections': {},
+                'total_students': 0
+            }
+        
+        sec = student.section or 'No Section'
+        if sec not in divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year]['semesters'][sem]['sections']:
+            divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year]['semesters'][sem]['sections'][sec] = {
+                'students': [],
+                'count': 0
+            }
+        
+        divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year]['semesters'][sem]['sections'][sec]['students'].append(student)
+        divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year]['semesters'][sem]['sections'][sec]['count'] += 1
+        divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year]['semesters'][sem]['total_students'] += 1
+        divisions[dept_code]['programs'][program_code]['years'][year_key]['year_of_study'][study_year]['total_students'] += 1
+        divisions[dept_code]['programs'][program_code]['years'][year_key]['total_students'] += 1
+    
+    context = {
+        'divisions': divisions,
+        'departments': departments,
+        'programs': programs,
+        'year_choices': Student.YEAR_OF_STUDY_CHOICES,
+        'semester_choices': Student.SEMESTER_CHOICES,
+        'section_choices': Student.SECTION_CHOICES,
+        'filters': {
+            'department_id': department_id,
+            'academic_program_id': academic_program_id,
+            'academic_year': academic_year,
+            'year_of_study': year_of_study,
+            'semester': semester,
+            'section': section,
+        }
+    }
+    
+    return render(request, 'dashboard/student_divisions.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def student_assignments(request):
+    """Student assignment management page"""
+    if request.method == 'POST':
+        # Handle student assignment
+        student_ids = request.POST.getlist('student_ids')
+        department_id = request.POST.get('department_id')
+        academic_program_id = request.POST.get('academic_program_id')
+        academic_year = request.POST.get('academic_year')
+        year_of_study = request.POST.get('year_of_study')
+        semester = request.POST.get('semester')
+        section = request.POST.get('section')
+        
+        try:
+            updated_count = 0
+            for student_id in student_ids:
+                student = Student.objects.get(id=student_id)
+                
+                if department_id:
+                    student.department_id = department_id
+                if academic_program_id:
+                    student.academic_program_id = academic_program_id
+                if academic_year:
+                    student.academic_year = academic_year
+                if year_of_study:
+                    student.year_of_study = year_of_study
+                if semester:
+                    student.semester = semester
+                if section:
+                    student.section = section
+                
+                student.updated_by = request.user
+                student.save()
+                updated_count += 1
+            
+            messages.success(request, f'Successfully updated {updated_count} students.')
+            return redirect('dashboard:student_assignments')
+            
+        except Exception as e:
+            messages.error(request, f'Error updating students: {str(e)}')
+    
+    # Get all departments and programs
+    departments = Department.objects.filter(is_active=True).order_by('name')
+    programs = AcademicProgram.objects.filter(is_active=True).order_by('name')
+    
+    # Get students for assignment
+    students = Student.objects.filter(status='ACTIVE').order_by('roll_number')
+    
+    context = {
+        'students': students,
+        'departments': departments,
+        'programs': programs,
+        'year_choices': Student.YEAR_OF_STUDY_CHOICES,
+        'semester_choices': Student.SEMESTER_CHOICES,
+        'section_choices': Student.SECTION_CHOICES,
+    }
+    
+    return render(request, 'dashboard/student_assignments.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def student_division_statistics(request):
+    """Student division statistics page"""
+    # Get filter parameters
+    department_id = request.GET.get('department')
+    academic_year = request.GET.get('academic_year')
+    
+    # Get all departments
+    departments = Department.objects.filter(is_active=True).order_by('name')
+    
+    # Get students with filters
+    students = Student.objects.filter(status='ACTIVE')
+    
+    if department_id:
+        students = students.filter(department_id=department_id)
+    if academic_year:
+        students = students.filter(academic_year=academic_year)
+    
+    # Calculate statistics
+    stats = {}
+    for dept in departments:
+        dept_students = students.filter(department=dept)
+        if dept_students.exists():
+            # Count by year of study
+            year_counts = {}
+            for year, _ in Student.YEAR_OF_STUDY_CHOICES:
+                count = dept_students.filter(year_of_study=year).count()
+                if count > 0:
+                    year_counts[year] = count
+            
+            # Count by semester
+            semester_counts = {}
+            for semester, _ in Student.SEMESTER_CHOICES:
+                count = dept_students.filter(semester=semester).count()
+                if count > 0:
+                    semester_counts[semester] = count
+            
+            # Count by gender
+            gender_counts = {}
+            for gender, _ in Student.GENDER_CHOICES:
+                count = dept_students.filter(gender=gender).count()
+                if count > 0:
+                    gender_counts[gender] = count
+            
+            # Count by program
+            program_counts = {}
+            for program in AcademicProgram.objects.filter(department=dept, is_active=True):
+                count = dept_students.filter(academic_program=program).count()
+                if count > 0:
+                    program_counts[program.code] = {
+                        'name': program.name,
+                        'count': count
+                    }
+            
+            stats[dept.code] = {
+                'department': dept,
+                'total_students': dept_students.count(),
+                'by_year_of_study': year_counts,
+                'by_semester': semester_counts,
+                'by_gender': gender_counts,
+                'by_program': program_counts
+            }
+    
+    context = {
+        'stats': stats,
+        'departments': departments,
+        'year_choices': Student.YEAR_OF_STUDY_CHOICES,
+        'semester_choices': Student.SEMESTER_CHOICES,
+        'filters': {
+            'department_id': department_id,
+            'academic_year': academic_year,
+        }
+    }
+    
+    return render(request, 'dashboard/student_division_statistics.html', context)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def bulk_assign_students(request):
+    """API endpoint for bulk student assignment"""
+    try:
+        data = request.data
+        student_ids = data.get('student_ids', [])
+        assignment_data = data.get('assignment', {})
+        
+        updated_count = 0
+        errors = []
+        
+        for student_id in student_ids:
+            try:
+                student = Student.objects.get(id=student_id)
+                
+                if assignment_data.get('department_id'):
+                    student.department_id = assignment_data['department_id']
+                if assignment_data.get('academic_program_id'):
+                    student.academic_program_id = assignment_data['academic_program_id']
+                if assignment_data.get('academic_year'):
+                    student.academic_year = assignment_data['academic_year']
+                if assignment_data.get('year_of_study'):
+                    student.year_of_study = assignment_data['year_of_study']
+                if assignment_data.get('semester'):
+                    student.semester = assignment_data['semester']
+                if assignment_data.get('section'):
+                    student.section = assignment_data['section']
+                
+                student.updated_by = request.user
+                student.save()
+                updated_count += 1
+                
+            except Student.DoesNotExist:
+                errors.append(f'Student with ID {student_id} not found')
+            except Exception as e:
+                errors.append(f'Error updating student {student_id}: {str(e)}')
+        
+        return Response({
+            'success': True,
+            'updated_count': updated_count,
+            'errors': errors
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=400)

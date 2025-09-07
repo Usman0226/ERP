@@ -764,10 +764,15 @@ function refreshData() {
 
 // Initialize Charts
 document.addEventListener('DOMContentLoaded', function() {
-    // Activity Chart
-    const activityCtx = document.getElementById('activityChart');
-    if (activityCtx) {
-        new Chart(activityCtx, {
+    try {
+        // Activity Chart
+        const activityCtx = document.getElementById('activityChart');
+        if (activityCtx) {
+            // Destroy existing chart if it exists
+            if (window.activityChart && typeof window.activityChart.destroy === 'function') {
+                window.activityChart.destroy();
+            }
+            window.activityChart = new Chart(activityCtx, {
             type: 'line',
             data: {
                 labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
@@ -815,7 +820,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Distribution Chart
     const distributionCtx = document.getElementById('distributionChart');
     if (distributionCtx) {
-        new Chart(distributionCtx, {
+        // Destroy existing chart if it exists
+        if (window.distributionChart && typeof window.distributionChart.destroy === 'function') {
+            window.distributionChart.destroy();
+        }
+        window.distributionChart = new Chart(distributionCtx, {
             type: 'doughnut',
             data: {
                 labels: ['Students', 'Faculty', 'Admin', 'Staff'],
@@ -844,6 +853,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
+    }
+    
+    } catch (error) {
+        console.error('Error initializing charts:', error);
     }
     
     // Add smooth animations to stats cards

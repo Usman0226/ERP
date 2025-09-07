@@ -38,7 +38,7 @@ if len(SECRET_KEY) < 50 or SECRET_KEY == 'change-this-to-a-strong-secret':
     )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
 
@@ -77,6 +77,8 @@ INSTALLED_APPS = [
     'mentoring',
     'feedback',
     'open_requests',
+    'assignments',
+    'docs',
     'campshub360',
 ]
 
@@ -125,7 +127,7 @@ DATABASES = {
         'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),  # 10 minutes
         'OPTIONS': {
             'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
-            'sslmode': 'prefer',
+            'sslmode': os.getenv('POSTGRES_SSL_MODE', 'require'),
         },
     },
     'read_replica': {
@@ -138,7 +140,7 @@ DATABASES = {
         'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),
         'OPTIONS': {
             'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
-            'sslmode': 'prefer',
+            'sslmode': os.getenv('POSTGRES_SSL_MODE', 'require'),
         },
     }
 }
@@ -243,6 +245,12 @@ SIMPLE_JWT = {
 # Use custom user model
 AUTH_USER_MODEL = 'accounts.User'
 
+# Custom authentication backends
+AUTHENTICATION_BACKENDS = [
+    'accounts.backends.EmailBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
 # Auth redirects
 LOGIN_URL = 'dashboard:login'
 LOGIN_REDIRECT_URL = 'dashboard:home'
@@ -256,7 +264,6 @@ if os.getenv('REDIS_URL'):
             'LOCATION': os.getenv('REDIS_URL'),
             'TIMEOUT': int(os.getenv('CACHE_DEFAULT_TIMEOUT', '300')),
             'OPTIONS': {
-                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             }
         },
         'sessions': {
@@ -264,7 +271,6 @@ if os.getenv('REDIS_URL'):
             'LOCATION': os.getenv('REDIS_URL'),
             'TIMEOUT': int(os.getenv('SESSION_CACHE_TIMEOUT', '86400')),  # 24 hours
             'OPTIONS': {
-                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             }
         },
         'query_cache': {
@@ -272,7 +278,6 @@ if os.getenv('REDIS_URL'):
             'LOCATION': os.getenv('REDIS_URL'),
             'TIMEOUT': int(os.getenv('QUERY_CACHE_TIMEOUT', '600')),  # 10 minutes
             'OPTIONS': {
-                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             }
         }
     }
@@ -306,7 +311,7 @@ else:
     }
 
 # Cache session engine for high performance
-SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_CACHE_ALIAS = 'sessions'
 
 # Security Settings for High-Performance Production
@@ -318,7 +323,8 @@ SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() == 'true
 # CSRF Protection
 CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False').lower() == 'true'
 CSRF_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SAMESITE = 'Strict'
+CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'Strict')
+CSRF_USE_SESSIONS = os.getenv('CSRF_USE_SESSIONS', 'False').lower() == 'true'
 
 # Session Security
 SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False').lower() == 'true'
@@ -333,7 +339,7 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
 
 # Database Query Optimization (PostgreSQL specific)
 DATABASES['default']['OPTIONS'].update({
-    'sslmode': 'prefer',
+    'sslmode': os.getenv('POSTGRES_SSL_MODE', 'require'),
 })
 
 # Connection Pooling
@@ -341,11 +347,17 @@ DATABASES['default']['CONN_MAX_AGE'] = 600  # 10 minutes
 DATABASES['read_replica']['CONN_MAX_AGE'] = 600
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
+CORS_ALLOWED_ORIGINS = os.getenv(
+    'CORS_ALLOWED_ORIGINS',
+    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,https://campushub360.xyz,https://www.campushub360.xyz'
+).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
 # CSRF settings
-CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
+CSRF_TRUSTED_ORIGINS = os.getenv(
+    'CSRF_TRUSTED_ORIGINS',
+    'http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:8000,http://localhost:8000,http://localhost:5173,http://127.0.0.1:5173,https://campushub360.xyz,https://www.campushub360.xyz'
+).split(',')
 
 # Redis Configuration
 REDIS_URL = os.getenv('REDIS_URL')

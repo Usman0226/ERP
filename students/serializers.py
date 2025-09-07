@@ -26,8 +26,9 @@ class StudentSerializer(serializers.ModelSerializer):
             'id', 'roll_number', 'first_name', 'last_name', 'middle_name',
             'full_name', 'date_of_birth', 'age', 'gender', 'email', 
             'student_mobile', 'address_line1', 'address_line2', 'city', 
-            'state', 'postal_code', 'country', 'full_address', 'grade_level',
-            'section', 'academic_year', 'quota', 'rank', 'village',
+            'state', 'postal_code', 'country', 'full_address',
+            'section', 'academic_year', 'year_of_study', 'semester', 'quota', 'rank', 
+            'department', 'academic_program', 'village',
             'aadhar_number', 'religion', 'caste', 'subcaste',
             'father_name', 'mother_name', 'father_mobile', 'mother_mobile',
             'enrollment_date', 'expected_graduation_date', 'status',
@@ -95,7 +96,8 @@ class StudentListSerializer(serializers.ModelSerializer):
         model = Student
         fields = [
             'id', 'roll_number', 'full_name', 'age', 'gender', 'email',
-            'grade_level', 'section', 'status', 'enrollment_date', 'created_at'
+            'year_of_study', 'semester', 'section', 'department', 'academic_program', 
+            'status', 'enrollment_date', 'created_at'
         ]
 
 
@@ -170,3 +172,75 @@ class StudentWithCustomFieldsSerializer(StudentSerializer):
     
     class Meta(StudentSerializer.Meta):
         fields = StudentSerializer.Meta.fields + ['custom_field_values']
+
+
+class StudentDivisionSerializer(serializers.Serializer):
+    """Serializer for student division data"""
+    department_id = serializers.UUIDField()
+    department_name = serializers.CharField()
+    department_code = serializers.CharField()
+    years = serializers.DictField()
+
+
+class StudentAssignmentSerializer(serializers.Serializer):
+    """Serializer for student assignment requests"""
+    student_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        help_text="List of student IDs to assign"
+    )
+    department_id = serializers.UUIDField(required=False, allow_null=True)
+    academic_program_id = serializers.UUIDField(required=False, allow_null=True)
+    academic_year = serializers.CharField(required=False, allow_null=True, max_length=9)
+    year_of_study = serializers.CharField(required=False, allow_null=True, max_length=1)
+    semester = serializers.CharField(required=False, allow_null=True, max_length=2)
+    section = serializers.CharField(required=False, allow_null=True, max_length=1)
+    
+    def validate_student_ids(self, value):
+        """Validate that student IDs exist"""
+        if not value:
+            raise serializers.ValidationError("At least one student ID is required")
+        
+        existing_students = Student.objects.filter(id__in=value).count()
+        if existing_students != len(value):
+            raise serializers.ValidationError("One or more student IDs are invalid")
+        
+        return value
+
+
+class BulkAssignmentCriteriaSerializer(serializers.Serializer):
+    """Serializer for bulk assignment criteria"""
+    current_department = serializers.UUIDField(required=False, allow_null=True)
+    current_academic_program = serializers.UUIDField(required=False, allow_null=True)
+    current_academic_year = serializers.CharField(required=False, allow_null=True, max_length=9)
+    current_year_of_study = serializers.CharField(required=False, allow_null=True, max_length=1)
+    current_semester = serializers.CharField(required=False, allow_null=True, max_length=2)
+    current_section = serializers.CharField(required=False, allow_null=True, max_length=1)
+    gender = serializers.CharField(required=False, allow_null=True, max_length=1)
+    quota = serializers.CharField(required=False, allow_null=True, max_length=25)
+
+
+class BulkAssignmentSerializer(serializers.Serializer):
+    """Serializer for bulk assignment requests"""
+    criteria = BulkAssignmentCriteriaSerializer()
+    assignment = StudentAssignmentSerializer()
+    
+    def validate(self, data):
+        """Validate that at least one assignment field is provided"""
+        assignment = data.get('assignment', {})
+        assignment_fields = ['department_id', 'academic_program_id', 'academic_year', 'year_of_study', 'semester', 'section']
+        
+        if not any(assignment.get(field) for field in assignment_fields):
+            raise serializers.ValidationError(
+                "At least one assignment field (department_id, academic_program_id, academic_year, year_of_study, semester, section) is required"
+            )
+        
+        return data
+
+
+class StudentDivisionStatsSerializer(serializers.Serializer):
+    """Serializer for student division statistics"""
+    department_code = serializers.CharField()
+    department_name = serializers.CharField()
+    total_students = serializers.IntegerField()
+    years = serializers.DictField()
+    sections = serializers.DictField()

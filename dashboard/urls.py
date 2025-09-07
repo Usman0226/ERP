@@ -6,7 +6,7 @@ app_name = 'dashboard'
 
 urlpatterns = [
     # Auth
-    path('login/', auth_views.LoginView.as_view(template_name='dashboard/login.html'), name='login'),
+    path('login/', views.custom_login, name='login'),
     path('logout/', views.custom_logout, name='logout'),
 
     # Dashboard pages
@@ -30,6 +30,12 @@ urlpatterns = [
     path('student-import/', views.student_import_page, name='student_import'),
     path('student-import/process/', views.student_import_process, name='student_import_process'),
     path('download-template/', views.download_template, name='download_template'),
+    
+    # Student Division Management
+    path('students/divisions/', views.student_divisions, name='student_divisions'),
+    path('students/assignments/', views.student_assignments, name='student_assignments'),
+    path('students/division-statistics/', views.student_division_statistics, name='student_division_statistics'),
+    path('api/students/bulk-assign/', views.bulk_assign_students, name='bulk_assign_students'),
     
     # Faculty Management
     path('faculty/', views.faculty_list, name='faculty'),
@@ -231,4 +237,26 @@ urlpatterns = [
     path('open-requests/', views.open_requests_list, name='open_requests_list'),
     path('open-requests/create/', views.open_request_create, name='open_request_create'),
     path('open-requests/<int:request_id>/', views.open_request_detail, name='open_request_detail'),
+    
+    # Assignments Management
+    path('assignments/', views.assignments_dashboard, name='assignments_dashboard'),
+    path('assignments/list/', views.assignments_list, name='assignments_list'),
+    path('assignments/create/', views.assignment_create, name='assignment_create'),
+    path('assignments/<uuid:assignment_id>/', views.assignment_detail, name='assignment_detail'),
+    path('assignments/<uuid:assignment_id>/edit/', views.assignment_edit, name='assignment_edit'),
+    path('assignments/<uuid:assignment_id>/submit/', views.assignment_submit, name='assignment_submit'),
+    path('assignments/submissions/<uuid:submission_id>/grade/', views.assignment_grade, name='assignment_grade'),
+    path('assignments/categories/', views.assignment_categories, name='assignment_categories'),
+    path('assignments/templates/', views.assignment_templates, name='assignment_templates'),
+    path('assignments/statistics/', views.assignment_statistics, name='assignment_statistics'),
+    
+    # Assignments AJAX Endpoints
+    path('assignments/ajax/file-upload/', views.assignment_file_upload, name='assignment_file_upload'),
+    path('assignments/ajax/<uuid:assignment_id>/publish/', views.assignment_publish_ajax, name='assignment_publish_ajax'),
+    path('assignments/ajax/<uuid:assignment_id>/close/', views.assignment_close_ajax, name='assignment_close_ajax'),
+    path('assignments/ajax/<uuid:assignment_id>/comment/', views.assignment_comment_ajax, name='assignment_comment_ajax'),
+    path('assignments/ajax/stats/', views.assignment_stats_ajax, name='assignment_stats_ajax'),
+    path('assignments/ajax/autocomplete/', views.assignment_autocomplete, name='assignment_autocomplete'),
+            path('assignments/ajax/bulk-action/', views.assignment_bulk_action, name='assignment_bulk_action'),
+            path('assignments/ajax/filter-students/', views.filter_students_ajax, name='filter_students_ajax'),
 ]

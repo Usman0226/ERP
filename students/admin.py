@@ -28,11 +28,11 @@ class StudentCustomFieldValueInline(admin.TabularInline):
 class StudentAdmin(admin.ModelAdmin):
     """Admin configuration for Student model"""
     list_display = [
-        'roll_number', 'full_name', 'grade_level', 'section', 'status', 
+        'roll_number', 'full_name', 'year_of_study', 'semester', 'section', 'status', 
         'email', 'student_mobile', 'enrollment_date', 'age'
     ]
     list_filter = [
-        'status', 'grade_level', 'section', 'gender', 'quota', 'religion',
+        'status', 'year_of_study', 'semester', 'section', 'gender', 'quota', 'religion',
         'enrollment_date', 'created_at', 'updated_at'
     ]
     search_fields = [
@@ -54,7 +54,7 @@ class StudentAdmin(admin.ModelAdmin):
         }),
         ('Academic Information', {
             'fields': (
-                'section', 'academic_year', 'grade_level', 'quota', 'rank'
+                'section', 'academic_year', 'year_of_study', 'semester', 'quota', 'rank'
             )
         }),
         ('Contact Information', {
@@ -127,11 +127,11 @@ class StudentAdmin(admin.ModelAdmin):
 class StudentEnrollmentHistoryAdmin(admin.ModelAdmin):
     """Admin configuration for Student Enrollment History"""
     list_display = [
-        'student', 'grade_level', 'academic_year', 
+        'student', 'year_of_study', 'semester', 'academic_year', 
         'enrollment_date', 'completion_date', 'status'
     ]
     list_filter = [
-        'grade_level', 'academic_year', 'status', 
+        'year_of_study', 'semester', 'academic_year', 'status', 
         'enrollment_date', 'completion_date'
     ]
     search_fields = [
@@ -143,7 +143,7 @@ class StudentEnrollmentHistoryAdmin(admin.ModelAdmin):
     fieldsets = (
         (None, {
             'fields': (
-                'student', 'grade_level', 'academic_year',
+                'student', 'year_of_study', 'semester', 'academic_year',
                 'enrollment_date', 'completion_date', 'status', 'notes'
             )
         }),
