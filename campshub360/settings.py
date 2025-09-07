@@ -41,7 +41,10 @@ if len(SECRET_KEY) < 50 or SECRET_KEY == 'change-this-to-a-strong-secret':
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
+ALLOWED_HOSTS = os.getenv(
+    'ALLOWED_HOSTS',
+    'localhost,127.0.0.1,testserver,campushub360.xyz,www.campushub360.xyz,api.campushub360.xyz,.campushub360.xyz,3.109.5.217,ec2-3-109-5-217.ap-south-1.compute.amazonaws.com'
+).split(',')
 
 
 # Application definition
@@ -353,14 +356,21 @@ DATABASES['read_replica']['CONN_MAX_AGE'] = 600
 # CORS settings
 CORS_ALLOWED_ORIGINS = os.getenv(
     'CORS_ALLOWED_ORIGINS',
-    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,https://campushub360.xyz,https://www.campushub360.xyz'
+    'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,https://localhost:3000,https://127.0.0.1:3000,'
+    'http://localhost:5173,http://127.0.0.1:5173,http://0.0.0.0:5173,https://localhost:5173,https://127.0.0.1:5173,'
+    'https://campushub360.xyz,https://www.campushub360.xyz,https://api.campushub360.xyz,'
+    'http://3.109.5.217,https://3.109.5.217,http://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,https://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
 # CSRF settings
 CSRF_TRUSTED_ORIGINS = os.getenv(
     'CSRF_TRUSTED_ORIGINS',
-    'http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:8000,http://localhost:8000,http://localhost:5173,http://127.0.0.1:5173,https://campushub360.xyz,https://www.campushub360.xyz'
+    'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,https://localhost:3000,https://127.0.0.1:3000,'
+    'http://localhost:5173,http://127.0.0.1:5173,http://0.0.0.0:5173,https://localhost:5173,https://127.0.0.1:5173,'
+    'http://127.0.0.1:8000,http://localhost:8000,https://localhost:8000,'
+    'https://campushub360.xyz,https://www.campushub360.xyz,https://api.campushub360.xyz,'
+    'http://3.109.5.217,https://3.109.5.217,http://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,https://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com'
 ).split(',')
 
 # Development override: allow all hosts and permissive CORS for local testing
