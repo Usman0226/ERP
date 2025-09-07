@@ -5738,7 +5738,10 @@ class CustomLoginView(LoginView):
         messages.error(self.request, 'Invalid email or password.')
         return super().form_invalid(form)
 
-@csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie, csrf_protect
+
+@ensure_csrf_cookie
+@csrf_protect
 def custom_login(request):
     """Simple login view for testing"""
     from django.contrib.auth import authenticate, login

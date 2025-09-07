@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Collect static files (safe to run each start)
+python manage.py collectstatic --noinput --verbosity 0
+
+# Apply database migrations
+python manage.py migrate --noinput
+
+# Start gunicorn with configured settings module
+exec gunicorn campshub360.wsgi:application \
+  --config gunicorn.conf.py
+
+#!/usr/bin/env bash
+set -euo pipefail
+
 export PYTHONUNBUFFERED=1
 export DJANGO_SETTINGS_MODULE=campshub360.settings
 

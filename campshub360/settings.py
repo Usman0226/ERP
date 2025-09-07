@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers, default_methods
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -52,6 +53,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'whitenoise.runserver_nostatic',
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
     'django_filters',
@@ -84,6 +86,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -230,6 +233,7 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
     ),
+    'EXCEPTION_HANDLER': 'campshub360.exceptions.custom_exception_handler',
 }
 
 # SimpleJWT settings (optional sane defaults)
@@ -359,6 +363,28 @@ CSRF_TRUSTED_ORIGINS = os.getenv(
     'http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:8000,http://localhost:8000,http://localhost:5173,http://127.0.0.1:5173,https://campushub360.xyz,https://www.campushub360.xyz'
 ).split(',')
 
+# Development override: allow all hosts and permissive CORS for local testing
+if DEBUG:
+    ALLOWED_HOSTS = ['*']
+    # Allow any origin via regex while still permitting credentials in development
+    CORS_ALLOWED_ORIGIN_REGEXES = [r'^https?://.*$']
+    # Relax SameSite in development for local cross-origin testing
+    CSRF_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_SAMESITE = 'Lax'
+
+# Explicit CORS headers/methods
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'authorization',
+    'content-type',
+    'x-csrftoken',
+]
+CORS_ALLOW_METHODS = list(default_methods) + [
+    'PATCH',
+]
+
+# Custom CSRF failure handler to avoid generic 500s and add logging
+CSRF_FAILURE_VIEW = 'campshub360.csrf.csrf_failure'
+
 # Redis Configuration
 REDIS_URL = os.getenv('REDIS_URL')
 
@@ -397,3 +423,57 @@ if not DEBUG:
     # Enable secure cookies in production
     CSRF_COOKIE_SECURE = True
     SESSION_COOKIE_SECURE = True
+
+    # When frontend is on a different domain and cookies are needed across sites, prefer "None"
+    # Configure via env to avoid forcing a cross-site policy unintentionally
+    if os.getenv('CROSS_SITE_COOKIES', 'False').lower() == 'true':
+        CSRF_COOKIE_SAMESITE = 'None'
+        SESSION_COOKIE_SAMESITE = 'None'
+
+    # Honor proxy headers from ALB/Nginx to correctly detect HTTPS
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
+
+    # Enable compressed manifest static files for long-lived caching
+    STORAGES["staticfiles"]["BACKEND"] = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+    # Ensure host validation covers EC2 public DNS / custom domains via env
+    # Example env: ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com,ec2-xx-xx-xx-xx.compute-1.amazonaws.com
+
+    # Basic logging to capture 500s and CSRF issues in production
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'verbose': {
+                'format': '[{levelname}] {asctime} {name} {module}:{lineno} {message}',
+                'style': '{',
+            },
+            'simple': {
+                'format': '[{levelname}] {message}',
+                'style': '{',
+            },
+        },
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'formatter': 'verbose',
+            },
+        },
+        'loggers': {
+            'django': {
+                'handlers': ['console'],
+                'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO').upper(),
+            },
+            'django.request': {
+                'handlers': ['console'],
+                'level': 'ERROR',
+                'propagate': False,
+            },
+            'campshub360': {
+                'handlers': ['console'],
+                'level': 'INFO',
+                'propagate': False,
+            },
+        },
+    }

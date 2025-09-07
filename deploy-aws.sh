@@ -227,63 +227,7 @@ aws iam attach-role-policy \
     --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy \
     --region $AWS_REGION 2>/dev/null || echo "Policy already attached"
 
-# Create task definition
-echo -e "${YELLOW}📋 Creating ECS task definition...${NC}"
-cat > task-definition.json << EOF
-{
-  "family": "$PROJECT_NAME-task",
-  "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
-  "cpu": "$ECS_CPU",
-  "memory": "$ECS_MEMORY",
-  "executionRoleArn": "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$PROJECT_NAME-ecs-task-execution-role",
-  "containerDefinitions": [
-    {
-      "name": "$PROJECT_NAME-web",
-      "image": "$ECR_URI",
-      "portMappings": [
-        { "containerPort": 8000, "protocol": "tcp" }
-      ],
-      "command": ["./run-gunicorn.sh"],
-      "environment": [
-        { "name": "DEBUG", "value": "False" },
-        { "name": "ALLOWED_HOSTS", "value": "*" },
-        { "name": "GUNICORN_WORKER_CLASS", "value": "gevent" },
-        { "name": "GUNICORN_WORKER_CONNECTIONS", "value": "1000" }
-      ],
-      "secrets": [
-        {
-          "name": "SECRET_KEY",
-          "valueFrom": "arn:aws:secretsmanager:$AWS_REGION:$(aws sts get-caller-identity --query Account --output text):secret:$PROJECT_NAME/secret-key"
-        },
-        {
-          "name": "POSTGRES_PASSWORD",
-          "valueFrom": "arn:aws:secretsmanager:$AWS_REGION:$(aws sts get-caller-identity --query Account --output text):secret:$PROJECT_NAME/db-password"
-        }
-      ],
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/$PROJECT_NAME",
-          "awslogs-region": "$AWS_REGION",
-          "awslogs-stream-prefix": "ecs"
-        }
-      },
-      "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"],
-        "interval": 30,
-        "timeout": 5,
-        "retries": 3,
-        "startPeriod": 60
-      }
-    }
-  ]
-}
-EOF
-
-aws ecs register-task-definition --cli-input-json file://task-definition.json --region $AWS_REGION
-
-echo -e "${GREEN}✅ Task definition created${NC}"
+# Defer task definition creation until ALB is created to inject ALB DNS into env
 
 # Create Application Load Balancer
 echo -e "${YELLOW}⚖️ Creating Application Load Balancer...${NC}"
@@ -348,6 +292,70 @@ if [ -n "$ACM_ARN" ]; then
       --region $AWS_REGION >/dev/null
   echo -e "${GREEN}✅ HTTP now redirects to HTTPS${NC}"
 fi
+
+# Get ALB DNS name (needed for ALLOWED_HOSTS, CSRF/CORS)
+ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text --region $AWS_REGION)
+
+# Create task definition now that ALB_DNS is known
+echo -e "${YELLOW}📋 Creating ECS task definition...${NC}"
+cat > task-definition.json << EOF
+{
+  "family": "$PROJECT_NAME-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "$ECS_CPU",
+  "memory": "$ECS_MEMORY",
+  "executionRoleArn": "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$PROJECT_NAME-ecs-task-execution-role",
+  "containerDefinitions": [
+    {
+      "name": "$PROJECT_NAME-web",
+      "image": "$ECR_URI",
+      "portMappings": [
+        { "containerPort": 8000, "protocol": "tcp" }
+      ],
+      "command": ["./run-gunicorn.sh"],
+      "environment": [
+        { "name": "DEBUG", "value": "False" },
+        { "name": "ALLOWED_HOSTS", "value": "$ALB_DNS,localhost,127.0.0.1" },
+        { "name": "CSRF_TRUSTED_ORIGINS", "value": "http://$ALB_DNS,https://$ALB_DNS" },
+        { "name": "CORS_ALLOWED_ORIGINS", "value": "http://$ALB_DNS,https://$ALB_DNS" },
+        { "name": "SECURE_SSL_REDIRECT", "value": "True" },
+        { "name": "GUNICORN_WORKER_CLASS", "value": "gevent" },
+        { "name": "GUNICORN_WORKER_CONNECTIONS", "value": "1000" }
+      ],
+      "secrets": [
+        {
+          "name": "SECRET_KEY",
+          "valueFrom": "arn:aws:secretsmanager:$AWS_REGION:$(aws sts get-caller-identity --query Account --output text):secret:$PROJECT_NAME/secret-key"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:$AWS_REGION:$(aws sts get-caller-identity --query Account --output text):secret:$PROJECT_NAME/db-password"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/$PROJECT_NAME",
+          "awslogs-region": "$AWS_REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
+EOF
+
+aws ecs register-task-definition --cli-input-json file://task-definition.json --region $AWS_REGION
+
+echo -e "${GREEN}✅ Task definition created${NC}"
 
 # Create ECS service
 echo -e "${YELLOW}🚀 Creating ECS service...${NC}"

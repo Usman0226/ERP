@@ -82,6 +82,13 @@
 - [ ] Create superuser account
 - [ ] Configure environment variables
 - [ ] Test application functionality
+- [ ] Ensure environment variables include:
+  - `DEBUG=False`
+  - `ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com,ec2-xx-xx-xx-xx.compute-1.amazonaws.com`
+  - `CSRF_TRUSTED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com`
+  - `CORS_ALLOWED_ORIGINS=https://your-frontend-domain.com`
+  - `SECURE_SSL_REDIRECT=True` (when behind ALB/Nginx terminating TLS)
+  - `CROSS_SITE_COOKIES=True` (only if cookies must be sent cross-site)
 
 ### **Monitoring Setup**
 - [ ] CloudWatch log groups created
