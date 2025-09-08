@@ -41,10 +41,26 @@ if len(SECRET_KEY) < 50 or SECRET_KEY == 'change-this-to-a-strong-secret':
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv(
-    'ALLOWED_HOSTS',
-    'localhost,127.0.0.1,testserver,campushub360.xyz,www.campushub360.xyz,api.campushub360.xyz,.campushub360.xyz,13.232.220.214,ec2-13.232.220.214ap-south-1.compute.amazonaws.com,13.232.220.214,ec2-13.232.220.214.ap-south-1.compute.amazonaws.com'
-).split(',')
+# Hosts the app will accept. Defaults include EC2 IP/DNS and our domains.
+_env_allowed_hosts = os.getenv('ALLOWED_HOSTS', '').split(',') if os.getenv('ALLOWED_HOSTS') else []
+_default_allowed_hosts = [
+    'localhost',
+    '127.0.0.1',
+    'testserver',
+    # Project domains
+    '.campushub360.xyz',
+    'campushub360.xyz',
+    'www.campushub360.xyz',
+    'api.campushub360.xyz',
+    # EC2 public IP and DNS (adjustable via env if needed)
+    '13.232.220.214',
+    'ec2-13-232-220-214.ap-south-1.compute.amazonaws.com',
+    # Wildcard for any host under the AWS regional domain (covers rotating EC2 DNS)
+    '.ap-south-1.compute.amazonaws.com',
+]
+
+# Normalize and de-duplicate while dropping empties
+ALLOWED_HOSTS = [h.strip() for h in (_env_allowed_hosts or _default_allowed_hosts) if h and h.strip()]
 
 
 # Application definition
@@ -359,21 +375,34 @@ CORS_ALLOWED_ORIGINS = os.getenv(
     'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,https://localhost:3000,https://127.0.0.1:3000,'
     'http://localhost:5173,http://127.0.0.1:5173,http://0.0.0.0:5173,https://localhost:5173,https://127.0.0.1:5173,'
     'https://campushub360.xyz,https://www.campushub360.xyz,https://api.campushub360.xyz,'
-    'http://13.232.220.214,https://13.232.220.214,http://ec2-13.232.220.214.ap-south-1.compute.amazonaws.com,https://ec2-13.232.220.214.ap-south-1.compute.amazonaws.com,'
+    'http://13.232.220.214,https://13.232.220.214,http://13.232.220.214:8000,https://13.232.220.214:8000,'
+    'http://ec2-13.232.220.214.ap-south-1.compute.amazonaws.com,https://ec2-13.232.220.214.ap-south-1.compute.amazonaws.com,'
+    'http://ec2-13.232.220.214.ap-south-1.compute.amazonaws.com:8000,https://ec2-13.232.220.214.ap-south-1.compute.amazonaws.com:8000,'
     'http://13.201.129.254,https://13.201.129.254,http://ec2-13-201-129-254.ap-south-1.compute.amazonaws.com,https://ec2-13-201-129-254.ap-south-1.compute.amazonaws.com'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
 # CSRF settings
-CSRF_TRUSTED_ORIGINS = os.getenv(
-    'CSRF_TRUSTED_ORIGINS',
-    'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,https://localhost:3000,https://127.0.0.1:3000,'
-    'http://localhost:5173,http://127.0.0.1:5173,http://0.0.0.0:5173,https://localhost:5173,https://127.0.0.1:5173,'
-    'http://127.0.0.1:8000,http://localhost:8000,https://localhost:8000,'
-    'https://campushub360.xyz,https://www.campushub360.xyz,https://api.campushub360.xyz,'
-    'http://13.232.220.214,https://13.232.220.214,http://ec2-13.232.220.214.ap-south-1.compute.amazonaws.com,https://ec2-13.232.220.214.ap-south-1.compute.amazonaws.com,'
-    'http://13.201.129.254,https://13.201.129.254,http://ec2-13-201-129-254.ap-south-1.compute.amazonaws.com,https://ec2-13-201-129-254.ap-south-1.compute.amazonaws.com'
-).split(',')
+_env_csrf = os.getenv('CSRF_TRUSTED_ORIGINS')
+if _env_csrf:
+    CSRF_TRUSTED_ORIGINS = [h.strip() for h in _env_csrf.split(',') if h and h.strip()]
+else:
+    # Auto-build CSRF trusted origins from allowed hosts for common ports used by Django/Vite
+    _schemes = ['http://', 'https://']
+    _ports = ['', ':8000', ':5173', ':3000']
+    _csrf = []
+    for host in ALLOWED_HOSTS:
+        h = host.lstrip('.')
+        for s in _schemes:
+            for p in _ports:
+                _csrf.append(f"{s}{h}{p}")
+    # Also include loopback ip wildcards that often appear during testing
+    _csrf.extend([
+        'http://localhost', 'https://localhost',
+        'http://127.0.0.1', 'https://127.0.0.1',
+        'http://0.0.0.0', 'https://0.0.0.0',
+    ])
+    CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(_csrf))
 
 # Development override: allow all hosts and permissive CORS for local testing
 if DEBUG:
@@ -393,6 +422,15 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 CORS_ALLOW_METHODS = list(default_methods) + [
     'PATCH',
 ]
+
+# Broad but scoped CORS origin regexes for IPs, localhost, AWS EC2 DNS and project domain
+# This allows Vite dev servers (:5173) and Postman/browser origins across http/https
+CORS_ALLOWED_ORIGIN_REGEXES = list(set((globals().get('CORS_ALLOWED_ORIGIN_REGEXES') or []) + [
+    r'^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\\d+)?$',
+    r'^https?://(\\d{1,3}\.){3}\\d{1,3}(:\\d+)?$',
+    r'^https?://([a-zA-Z0-9-]+\\.)*campushub360\\.xyz(:\\d+)?$',
+    r'^https?://([a-zA-Z0-9-]+\\.)*compute\\.amazonaws\\.com(:\\d+)?$',
+]))
 
 # Custom CSRF failure handler to avoid generic 500s and add logging
 CSRF_FAILURE_VIEW = 'campshub360.csrf.csrf_failure'
@@ -432,9 +470,11 @@ if not DEBUG:
         SECURE_HSTS_INCLUDE_SUBDOMAINS = True
         SECURE_HSTS_PRELOAD = True
     
-    # Enable secure cookies in production
-    CSRF_COOKIE_SECURE = True
-    SESSION_COOKIE_SECURE = True
+    # Enable secure cookies in production unless explicitly disabled via env
+    # Useful for testing over plain HTTP on IP/port where secure cookies won't be sent
+    if os.getenv('FORCE_SECURE_COOKIES', 'False').lower() == 'true':
+        CSRF_COOKIE_SECURE = True
+        SESSION_COOKIE_SECURE = True
 
     # When frontend is on a different domain and cookies are needed across sites, prefer "None"
     # Configure via env to avoid forcing a cross-site policy unintentionally
@@ -471,6 +511,10 @@ if not DEBUG:
                 'class': 'logging.StreamHandler',
                 'formatter': 'verbose',
             },
+            'security_console': {
+                'class': 'logging.StreamHandler',
+                'formatter': 'simple',
+            },
         },
         'loggers': {
             'django': {
@@ -479,6 +523,11 @@ if not DEBUG:
             },
             'django.request': {
                 'handlers': ['console'],
+                'level': 'ERROR',
+                'propagate': False,
+            },
+            'django.security.DisallowedHost': {
+                'handlers': ['security_console'],
                 'level': 'ERROR',
                 'propagate': False,
             },
