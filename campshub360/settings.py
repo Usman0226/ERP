@@ -347,7 +347,7 @@ SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() == 'true
 CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False').lower() == 'true'
 # Allow frontend (React/Vite/Postman) to read CSRF cookie and send via header
 CSRF_COOKIE_HTTPONLY = False
-CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'Strict')
+CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'Lax')
 CSRF_USE_SESSIONS = os.getenv('CSRF_USE_SESSIONS', 'False').lower() == 'true'
 
 # Session Security
@@ -480,7 +480,7 @@ if not DEBUG:
 
     # When frontend is on a different domain and cookies are needed across sites, prefer "None"
     # Configure via env to avoid forcing a cross-site policy unintentionally
-    if os.getenv('CROSS_SITE_COOKIES', 'True').lower() == 'true':
+    if os.getenv('CROSS_SITE_COOKIES', 'False').lower() == 'true':
         CSRF_COOKIE_SAMESITE = 'None'
         SESSION_COOKIE_SAMESITE = 'None'
 

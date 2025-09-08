@@ -24,7 +24,7 @@ class StudentViewSet(viewsets.ModelViewSet):
     API endpoint for managing students
     """
     queryset = Student.objects.all().select_related('user', 'created_by', 'updated_by').only(
-        'id','roll_number','first_name','last_name','middle_name','grade_level','section','status','created_at','user_id'
+        'id','roll_number','first_name','last_name','middle_name','year_of_study','semester','section','status','created_at','user_id'
     ).order_by('-created_at')
     serializer_class = StudentSerializer
     permission_classes = [IsAuthenticated]
@@ -36,7 +36,7 @@ class StudentViewSet(viewsets.ModelViewSet):
     ]
     ordering_fields = [
         'roll_number', 'first_name', 'last_name', 'date_of_birth', 
-        'grade_level', 'section', 'status', 'created_at'
+        'year_of_study', 'semester', 'section', 'status', 'created_at'
     ]
     ordering = ['-created_at']
 
@@ -52,10 +52,10 @@ class StudentViewSet(viewsets.ModelViewSet):
         active_students = Student.objects.filter(status='ACTIVE').count()
         students_with_login = Student.objects.filter(user__isnull=False).count()
         
-        # Grade level distribution
-        grade_distribution = Student.objects.values('grade_level').annotate(
+        # Year of study distribution
+        grade_distribution = Student.objects.values('year_of_study').annotate(
             count=Count('id')
-        ).order_by('grade_level')
+        ).order_by('year_of_study')
         
         # Status distribution
         status_distribution = Student.objects.values('status').annotate(

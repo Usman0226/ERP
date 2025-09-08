@@ -26,7 +26,7 @@ class HighPerformanceStudentViewSet(viewsets.ModelViewSet):
     """
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['academic_year', 'grade_level', 'section', 'status']
+    filterset_fields = ['academic_year', 'year_of_study', 'semester', 'section', 'status']
     search_fields = ['first_name', 'last_name', 'roll_number', 'email']
     ordering_fields = ['created_at', 'roll_number', 'first_name', 'last_name']
     ordering = ['roll_number']
@@ -47,7 +47,7 @@ class HighPerformanceStudentViewSet(viewsets.ModelViewSet):
             'enrollment_history'
         ).only(
             'id', 'roll_number', 'first_name', 'last_name', 'email',
-            'academic_year', 'grade_level', 'section', 'status',
+            'academic_year', 'year_of_study', 'semester', 'section', 'status',
             'created_at', 'user_id', 'created_by_id', 'updated_by_id'
         )
     
@@ -131,7 +131,7 @@ class HighPerformanceStudentViewSet(viewsets.ModelViewSet):
         stats = {
             'total_students': Student.objects.count(),
             'active_students': Student.objects.filter(status='ACTIVE').count(),
-            'by_grade': dict(Student.objects.values('grade_level').annotate(count=Count('id'))),
+            'by_grade': dict(Student.objects.values('year_of_study').annotate(count=Count('id'))),
             'by_academic_year': dict(Student.objects.values('academic_year').annotate(count=Count('id'))),
             'by_section': dict(Student.objects.values('section').annotate(count=Count('id'))),
             'recent_enrollments': Student.objects.filter(
@@ -278,7 +278,7 @@ class HighPerformanceStudentAnalyticsViewSet(viewsets.ViewSet):
             'total_students': Student.objects.count(),
             'active_students': Student.objects.filter(status='ACTIVE').count(),
             'inactive_students': Student.objects.filter(status='INACTIVE').count(),
-            'grade_distribution': dict(Student.objects.values('grade_level').annotate(count=Count('id'))),
+            'grade_distribution': dict(Student.objects.values('year_of_study').annotate(count=Count('id'))),
             'section_distribution': dict(Student.objects.values('section').annotate(count=Count('id'))),
             'academic_year_distribution': dict(Student.objects.values('academic_year').annotate(count=Count('id'))),
             'recent_enrollments': Student.objects.filter(

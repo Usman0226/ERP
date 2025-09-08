@@ -20,8 +20,8 @@ class StudentSerializer(serializers.ModelSerializer):
         model = Student
         fields = [
             'id', 'roll_number', 'first_name', 'last_name', 'middle_name', 
-            'full_name', 'date_of_birth', 'age', 'gender', 'grade_level', 
-            'section', 'academic_year', 'email', 'student_mobile', 'quota', 
+            'full_name', 'date_of_birth', 'age', 'gender', 'year_of_study', 
+            'semester', 'section', 'academic_year', 'email', 'student_mobile', 'quota', 
             'rank', 'status', 'has_login', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -73,7 +73,7 @@ class StudentEnrollmentHistorySerializer(serializers.ModelSerializer):
         model = StudentEnrollmentHistory
         fields = [
             'id', 'student', 'student_name', 'student_roll_number',
-            'academic_year', 'grade_level', 'section', 'enrollment_date',
+            'academic_year', 'year_of_study', 'semester', 'section', 'enrollment_date',
             'status', 'remarks', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
