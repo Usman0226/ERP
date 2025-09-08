@@ -43,7 +43,7 @@ DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
 ALLOWED_HOSTS = os.getenv(
     'ALLOWED_HOSTS',
-    'localhost,127.0.0.1,testserver,campushub360.xyz,www.campushub360.xyz,api.campushub360.xyz,.campushub360.xyz,3.109.5.217,ec2-3-109-5-217.ap-south-1.compute.amazonaws.com'
+    'localhost,127.0.0.1,testserver,campushub360.xyz,www.campushub360.xyz,api.campushub360.xyz,.campushub360.xyz,3.109.5.217,ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,13.201.129.254,ec2-13-201-129-254.ap-south-1.compute.amazonaws.com'
 ).split(',')
 
 
@@ -125,10 +125,10 @@ WSGI_APPLICATION = 'campshub360.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', 'campushub360'),
-        'USER': os.getenv('POSTGRES_USER', 'postgres'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', '123456'),
-        'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+        'NAME': os.getenv('POSTGRES_DB', 'campushub'),
+        'USER': os.getenv('POSTGRES_USER', 'campushub'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'Campushub123'),
+        'HOST': os.getenv('POSTGRES_HOST', 'campushub.cl00sagomrhg.ap-south-1.rds.amazonaws.com'),
         'PORT': int(os.getenv('POSTGRES_PORT', '5432')),
         'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),  # 10 minutes
         'OPTIONS': {
@@ -359,7 +359,8 @@ CORS_ALLOWED_ORIGINS = os.getenv(
     'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,https://localhost:3000,https://127.0.0.1:3000,'
     'http://localhost:5173,http://127.0.0.1:5173,http://0.0.0.0:5173,https://localhost:5173,https://127.0.0.1:5173,'
     'https://campushub360.xyz,https://www.campushub360.xyz,https://api.campushub360.xyz,'
-    'http://3.109.5.217,https://3.109.5.217,http://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,https://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com'
+    'http://3.109.5.217,https://3.109.5.217,http://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,https://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,'
+    'http://13.201.129.254,https://13.201.129.254,http://ec2-13-201-129-254.ap-south-1.compute.amazonaws.com,https://ec2-13-201-129-254.ap-south-1.compute.amazonaws.com'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
@@ -370,7 +371,8 @@ CSRF_TRUSTED_ORIGINS = os.getenv(
     'http://localhost:5173,http://127.0.0.1:5173,http://0.0.0.0:5173,https://localhost:5173,https://127.0.0.1:5173,'
     'http://127.0.0.1:8000,http://localhost:8000,https://localhost:8000,'
     'https://campushub360.xyz,https://www.campushub360.xyz,https://api.campushub360.xyz,'
-    'http://3.109.5.217,https://3.109.5.217,http://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,https://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com'
+    'http://3.109.5.217,https://3.109.5.217,http://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,https://ec2-3-109-5-217.ap-south-1.compute.amazonaws.com,'
+    'http://13.201.129.254,https://13.201.129.254,http://ec2-13-201-129-254.ap-south-1.compute.amazonaws.com,https://ec2-13-201-129-254.ap-south-1.compute.amazonaws.com'
 ).split(',')
 
 # Development override: allow all hosts and permissive CORS for local testing
