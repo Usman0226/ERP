@@ -8,8 +8,8 @@ bind = os.getenv('GUNICORN_BIND', '0.0.0.0:8000')
 _cpu_count = multiprocessing.cpu_count()
 workers = int(os.getenv('GUNICORN_WORKERS', str(max(2, _cpu_count * 2 + 1))))
 
-# Async worker class for high concurrency APIs
-worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'gevent')
+# Worker class: use sync by default for compatibility
+worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'sync')
 worker_connections = int(os.getenv('GUNICORN_WORKER_CONNECTIONS', '1000'))
 threads = int(os.getenv('GUNICORN_THREADS', '1'))
 

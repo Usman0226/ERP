@@ -5,14 +5,20 @@ services:
       dockerfile: Dockerfile
     image: campushub360:latest
     command: ./run-gunicorn.sh
-    env_file:
-      - .env.production
     environment:
       - DJANGO_SETTINGS_MODULE=campshub360.settings
       - DEBUG=False
-      - GUNICORN_WORKER_CLASS=gevent
+      - SECRET_KEY=dev-secret-override
+      - GUNICORN_WORKER_CLASS=sync
       - GUNICORN_WORKER_CONNECTIONS=1000
       - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_DB=campushub
+      - POSTGRES_USER=campushub
+      - POSTGRES_PASSWORD=Campushub123
+      - POSTGRES_HOST=campushub.cl00sagomrhg.ap-south-1.rds.amazonaws.com
+      - POSTGRES_PORT=5432
+      - POSTGRES_SSL_MODE=require
+      - ALLOWED_HOSTS=localhost,127.0.0.1
     ports:
       - "8000:8000"
     healthcheck:
@@ -21,18 +27,8 @@ services:
       timeout: 10s
       retries: 3
     depends_on:
-      - redis
-
-  db:
-    image: postgres:15
-    environment:
-      - POSTGRES_DB=campushub360
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      redis:
+        condition: service_started
 
   redis:
     image: redis:7
@@ -41,7 +37,6 @@ services:
       - redisdata:/data
 
 volumes:
-  pgdata:
   redisdata:
 
 

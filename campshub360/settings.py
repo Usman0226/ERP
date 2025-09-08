@@ -126,8 +126,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('POSTGRES_DB', 'campushub'),
-        'USER': os.getenv('POSTGRES_USER', 'campushub'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'Campushub123'),
+        'USER': os.getenv('POSTGRES_USER', 'campushub360'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'Campushub360'),
         'HOST': os.getenv('POSTGRES_HOST', 'campushub.cl00sagomrhg.ap-south-1.rds.amazonaws.com'),
         'PORT': int(os.getenv('POSTGRES_PORT', '5432')),
         'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),  # 10 minutes
@@ -138,10 +138,10 @@ DATABASES = {
     },
     'read_replica': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', 'campushub360'),
-        'USER': os.getenv('POSTGRES_USER', 'postgres'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', '123456'),
-        'HOST': os.getenv('POSTGRES_REPLICA_HOST', os.getenv('POSTGRES_HOST', 'localhost')),
+        'NAME': os.getenv('POSTGRES_DB', 'campushub'),
+        'USER': os.getenv('POSTGRES_USER', 'campushub360'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'Campushub360'),
+        'HOST': os.getenv('POSTGRES_REPLICA_HOST', os.getenv('POSTGRES_HOST', 'campushub.cl00sagomrhg.ap-south-1.rds.amazonaws.com')),
         'PORT': int(os.getenv('POSTGRES_REPLICA_PORT', os.getenv('POSTGRES_PORT', '5432'))),
         'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),
         'OPTIONS': {
