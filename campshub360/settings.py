@@ -43,9 +43,9 @@ DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
 # Hosts the app will accept. Defaults include EC2 IP/DNS and our domains.
 _env_allowed_hosts = os.getenv('ALLOWED_HOSTS', '').split(',') if os.getenv('ALLOWED_HOSTS') else []
+# Always include localhost and 127.0.0.1 for local development
+_env_allowed_hosts.extend(['localhost', '127.0.0.1'])
 _default_allowed_hosts = [
-    'localhost',
-    '127.0.0.1',
     'testserver',
     # Project domains
     '.campushub360.xyz',
@@ -144,12 +144,14 @@ DATABASES = {
         'NAME': os.getenv('POSTGRES_DB', 'campushub'),
         'USER': os.getenv('POSTGRES_USER', 'campushub'),
         'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'Campushub123'),
-        'HOST': os.getenv('POSTGRES_HOST', 'campushub.cl00sagomrhg.ap-south-1.rds.amazonaws.com'),
+        # Choose host: local dev vs production
+        'HOST': os.getenv('POSTGRES_HOST', '127.0.0.1'),
         'PORT': int(os.getenv('POSTGRES_PORT', '5432')),
-        'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),  # 10 minutes
+        'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),
         'OPTIONS': {
             'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
-            'sslmode': os.getenv('POSTGRES_SSL_MODE', 'require'),
+            # SSL mode: disable locally, require in prod if env variable set
+            'sslmode': os.getenv('POSTGRES_SSL_MODE', 'disable'),
         },
     },
     'read_replica': {
@@ -157,15 +159,16 @@ DATABASES = {
         'NAME': os.getenv('POSTGRES_DB', 'campushub'),
         'USER': os.getenv('POSTGRES_USER', 'campushub360'),
         'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'Campushub'),
-        'HOST': os.getenv('POSTGRES_REPLICA_HOST', os.getenv('POSTGRES_HOST', 'campushub.cl00sagomrhg.ap-south-1.rds.amazonaws.com')),
+        'HOST': os.getenv('POSTGRES_REPLICA_HOST', os.getenv('POSTGRES_HOST', '127.0.0.1')),
         'PORT': int(os.getenv('POSTGRES_REPLICA_PORT', os.getenv('POSTGRES_PORT', '5432'))),
         'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '600')),
         'OPTIONS': {
             'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
-            'sslmode': os.getenv('POSTGRES_SSL_MODE', 'require'),
+            'sslmode': os.getenv('POSTGRES_SSL_MODE', 'disable'),
         },
     }
 }
+
 
 # Database configuration
 

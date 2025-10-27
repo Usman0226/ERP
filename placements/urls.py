@@ -16,7 +16,7 @@ app_name = 'placements'
 
 
 urlpatterns = [
-    path('api/', include(router.urls)),
+    path('', include(router.urls)),
 ]
 
 

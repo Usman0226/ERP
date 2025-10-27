@@ -20,5 +20,5 @@ router.register(r'custom-field-values', CustomFieldValueViewSet, basename='custo
 app_name = 'faculty'
 
 urlpatterns = [
-    path('api/', include(router.urls)),
+    path('', include(router.urls)),
 ]

@@ -13,5 +13,5 @@ router.register(r'academic-calendar', views.AcademicCalendarViewSet, basename='a
 app_name = 'academics'
 
 urlpatterns = [
-    path('api/', include(router.urls)),
+    path('', include(router.urls)),
 ]
